@@ -1,4 +1,4 @@
-import sqlite3, json
+﻿import sqlite3, json
 from datetime import datetime, timezone
 from config import DB_PATH, CARD_NUMBER, REQUIRED_CHANNEL, THREEXUI_INBOUND_ID, ADMIN_IDS as CONF_ADMIN_IDS
 from utils import now_iso
@@ -141,17 +141,22 @@ def remove_admin(uid:int):
 def ensure_defaults():
     if not get_setting("ACTIVE_INBOUND_ID"): set_setting("ACTIVE_INBOUND_ID", str(THREEXUI_INBOUND_ID))
     if not get_setting("REQUIRED_CHANNEL"): set_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)
-    if not get_setting("WELCOME_TEMPLATE"): set_setting("WELCOME_TEMPLATE", "<b>🎉 به <i>PingX</i> خوش آمدید</b>\n\n⚡️ سرعت و امنیت ⚡️")
-    if not get_setting("POST_PURCHASE_TEMPLATE"): set_setting("POST_PURCHASE_TEMPLATE", "راهنمای پس از خرید…")
+    if not get_setting("WELCOME_TEMPLATE"): set_setting("WELCOME_TEMPLATE", "<b>به <i>PingX</i> خوش آمدید</b>\\n\\nاز دکمه‌های زیر استفاده کنید.")
+    if not get_setting("POST_PURCHASE_TEMPLATE"): set_setting("POST_PURCHASE_TEMPLATE", "اشتراک شما آماده شد.")
     if not get_setting("CARD_NUMBER"): set_setting("CARD_NUMBER", CARD_NUMBER)
+    if not get_setting("PURCHASE_SUCCESS_TEMPLATE"): set_setting("PURCHASE_SUCCESS_TEMPLATE", "✅ خرید با موفقیت انجام شد. لینک اشتراک برای شما ارسال شد.")
+    if not get_setting("PURCHASE_FAILED_TEMPLATE"): set_setting("PURCHASE_FAILED_TEMPLATE", "❌ خرید ناموفق بود. لطفاً بعداً تلاش کنید یا با پشتیبانی در ارتباط باشید.")
+    if not get_setting("PAYMENT_RECEIPT_TEMPLATE"): set_setting("PAYMENT_RECEIPT_TEMPLATE", "📩 درخواست شارژ شما ثبت شد و پس از بررسی ادمین اطلاع‌رسانی می‌شود.")
+    if not get_setting("TICKET_OPENED_TEMPLATE"): set_setting("TICKET_OPENED_TEMPLATE", "🎟️ تیکت شما باز شد. لطفاً مشکل خود را توضیح دهید.")
+    if not get_setting("TICKET_CLOSED_TEMPLATE"): set_setting("TICKET_CLOSED_TEMPLATE", "✅ تیکت شما بسته شد. در صورت نیاز می‌توانید تیکت جدیدی باز کنید.")
 
 def ensure_default_plans():
     have={r[0] for r in cur.execute("SELECT id FROM plans").fetchall()}
     defs=[
-        ("p1","🟢 30 روز | 100GB",30,100,150_000,{}),
-        ("unlim30","♾ نامحدود | 30 روز",30,0,300_000,{}),
-        ("trial1","🧪 تست ۱ روزه | نامحدود",1,0,0,{"test":True}),
-        ("admtrial7","🧪 تست ۷ روزه (ادمین)",7,0,0,{"admin_only":True,"test":True}),
+        ("p1","ًںں¢ 30 ط±ظˆط² | 100GB",30,100,150_000,{}),
+        ("unlim30","â™¾ ظ†ط§ظ…ط­ط¯ظˆط¯ | 30 ط±ظˆط²",30,0,300_000,{}),
+        ("trial1","ًں§ھ طھط³طھ غ± ط±ظˆط²ظ‡ | ظ†ط§ظ…ط­ط¯ظˆط¯",1,0,0,{"test":True}),
+        ("admtrial7","ًں§ھ طھط³طھ غ· ط±ظˆط²ظ‡ (ط§ط¯ظ…غŒظ†)",7,0,0,{"admin_only":True,"test":True}),
     ]
     for pid,title,days,gb,price,flags in defs:
         if pid in have: continue
@@ -287,3 +292,4 @@ def list_ticket_messages_page(tid:int, page:int, size:int):
     """,(tid,size,off)).fetchall()]
     total=cur.execute("SELECT COUNT(1) FROM ticket_messages WHERE ticket_id=?",(tid,)).fetchone()[0]
     return rows,total
+

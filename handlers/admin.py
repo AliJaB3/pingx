@@ -658,3 +658,62 @@ async def admin_admins_remove(cb:CallbackQuery):
 
 
 
+
+@router.callback_query(F.data=="admin:dashboard")
+async def admin_dashboard(cb:CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    # Users stats (last 7 days)
+    import datetime as dt
+    from collections import Counter
+    rows = cur.execute("SELECT created_at FROM users").fetchall()
+    days = [(str(r[0])[:10]) for r in rows]
+    cnt = Counter(days)
+    today = dt.date.today()
+    labels = []
+    values = []
+    for i in range(6,-1,-1):
+        d = (today - dt.timedelta(days=i)).isoformat()
+        labels.append(d[5:])
+        values.append(cnt.get(d,0))
+    total_users = cur.execute("SELECT COUNT(1) FROM users").fetchone()[0]
+    # Purchases last 7 days
+    rows2 = cur.execute("SELECT created_at FROM purchases").fetchall()
+    days2 = [(str(r[0])[:10]) for r in rows2]
+    cnt2 = Counter(days2)
+    pvals = []
+    for i in range(6,-1,-1):
+        d=(today-dt.timedelta(days=i)).isoformat(); pvals.append(cnt2.get(d,0))
+    # Top consumers
+    top = cur.execute("""
+        SELECT p.user_id, COALESCE(SUM(c.up + c.down),0) AS used
+        FROM purchases p LEFT JOIN cache_usage c ON c.purchase_id = p.id
+        GROUP BY p.user_id ORDER BY used DESC LIMIT 5
+    """).fetchall()
+    top_lines = []
+    for t in top:
+        try:
+            uid=int(t[0]); used=int(t[1] or 0)
+            top_lines.append(f"{uid}: {human_bytes(used)}")
+        except:
+            continue
+    # Inbounds status
+    ib_txt = "پیکربندی نشده"
+    try:
+        if three_session:
+            ibs = await three_session.list_inbounds()
+            ib_txt = f"تعداد این‌باندها: {len(ibs)}"
+    except Exception as e:
+        ib_txt = f"خطا در دریافت این‌باندها: {e}"
+    # Compose
+    chart_users = " ".join([f"{l}:{v}" for l,v in zip(labels, values)])
+    chart_pur = " ".join([f"{l}:{v}" for l,v in zip(labels, pvals)])
+    text = (
+        "<b>📊 داشبورد</b>\n\n"
+        f"👥 کاربران کل: <b>{total_users}</b>\n"
+        f"کاربران ۷ روز اخیر: {chart_users}\n"
+        f"خریدها ۷ روز اخیر: {chart_pur}\n\n"
+        f"🔥 کاربران پرمصرف:\n" + ("\n".join(top_lines) or "-") + "\n\n"
+        f"🛰️ وضعیت این‌باندها: {ib_txt}"
+    )
+    await cb.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")]]))

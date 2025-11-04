@@ -171,7 +171,7 @@ async def buy_confirm(cb: CallbackQuery):
         )
     except Exception:
         pass
-    extra = get_setting("POST_PURCHASE_TEMPLATE", "").strip()
+    extra = get_setting("PURCHASE_SUCCESS_TEMPLATE", get_setting("POST_PURCHASE_TEMPLATE", "")).strip()
     if extra:
         await cb.bot.send_message(cb.from_user.id, extra)
     log_evt(cb.from_user.id, "purchase_confirm", {"purchase_id": pid2, "plan_id": plan["id"], "inbound_id": inbound_id})
@@ -282,6 +282,7 @@ async def sub_stat_refresh(cb: CallbackQuery):
 
     cache_set_usage(pid, int(stat.get("up") or 0), int(stat.get("down") or 0), total, expiry)
     await cb.answer("ط¨ظ‡â€Œط±ظˆط²ط±ط³ط§ظ†غŒ ط´ط¯"); await sub_detail(cb)
+
 
 
 
