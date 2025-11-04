@@ -9,8 +9,9 @@ from db import (
     db_get_wallet, db_new_payment, db_get_payment, db_add_wallet, db_update_payment_status,
     db_list_pending_payments_page, cur,
 )
+from keyboards import kb_admin_root
 from utils import htmlesc
-import json, re
+import json
 
 router = Router()
 
@@ -36,11 +37,11 @@ async def wallet(cb: CallbackQuery):
 async def topup_ask_amount(cb: CallbackQuery, state: FSMContext):
     await state.set_state(Topup.amount)
     msg = (
-        "<b>افزایش موجودی کیف‌پول</b>\n\n"
-        "مبلغ واریزی را ارسال کنید. سپس در صورت تمایل، عکس رسید را ارسال کنید.\n\n"
-        f"<b>شماره کارت:</b> <code>{CARD_NUMBER}</code>\n"
-        "مثال: 150000\n\n"
-        f"حداکثر تعداد تصاویر: {MAX_RECEIPT_PHOTOS} | حداکثر حجم هر تصویر: {MAX_RECEIPT_MB}MB"
+        "<b>Top up wallet</b>\n\n"
+        "Send the amount you transferred. Then attach receipt photos (optional).\n\n"
+        f"<b>Card:</b> <code>{CARD_NUMBER}</code>\n"
+        "Example: 150000\n\n"
+        f"Max photos: {MAX_RECEIPT_PHOTOS}. Max per photo: {MAX_RECEIPT_MB} MB."
     )
     await cb.message.edit_text(msg, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data="wallet")]]), parse_mode=ParseMode.HTML)
 
@@ -50,11 +51,11 @@ async def topup_got_amount(m: Message, state: FSMContext):
     try:
         amount = int(str(m.text).replace(",", "").strip())
     except Exception:
-        await m.reply("مبلغ نامعتبر است. یک عدد ارسال کنید.")
+        await m.reply("Invalid amount. Send a number.")
         return
     await state.update_data(amount=amount, photos=[])
     await state.set_state(Topup.note)
-    await m.reply("حالا عکس/عکس‌های رسید را بفرستید، سپس عبارت done را ارسال کنید.")
+    await m.reply("Now send receipt photos (optional), then send 'done'.")
 
 
 @router.message(F.photo)
@@ -67,16 +68,16 @@ async def collect_photo(m: Message, state: FSMContext):
     try:
         sz = int(m.photo[-1].file_size or 0)
         if sz > int(MAX_RECEIPT_MB) * 1024 * 1024:
-            await m.reply("حجم تصویر زیاد است.")
+            await m.reply("Photo too large.")
             return
     except Exception:
         pass
     if len(photos) >= MAX_RECEIPT_PHOTOS:
-        await m.reply("حداکثر تعداد تصاویر مجاز است.")
+        await m.reply("Maximum number of photos reached.")
         return
     photos.append(m.photo[-1].file_id)
     await state.update_data(photos=photos)
-    await m.reply(f"تصویر ثبت شد ({len(photos)}/{MAX_RECEIPT_PHOTOS}).")
+    await m.reply(f"Photo saved ({len(photos)}/{MAX_RECEIPT_PHOTOS}).")
 
 
 @router.message(Topup.note)
@@ -91,33 +92,34 @@ async def topup_collect(m: Message, state: FSMContext):
         for aid in ADMIN_IDS:
             try:
                 if photos:
-                    await m.bot.send_message(aid, f"درخواست شارژ #{pid}\nاز <a href=\"tg://user?id={m.from_user.id}\">{htmlesc(m.from_user.full_name or m.from_user.username or str(m.from_user.id))}</a>\nمبلغ: {amount:,}", parse_mode=ParseMode.HTML)
+                    await m.bot.send_message(aid, f"New payment #{pid}\nFrom <a href=\"tg://user?id={m.from_user.id}\">{htmlesc(m.from_user.full_name or m.from_user.username or str(m.from_user.id))}</a>\nAmount: {amount:,}", parse_mode=ParseMode.HTML)
                     for ph in photos:
-                        await m.bot.send_photo(aid, ph, caption=f"شارژ #{pid}")
-                    await m.bot.send_message(aid, "اقدام:", reply_markup=kb)
+                        await m.bot.send_photo(aid, ph, caption=f"Payment #{pid}")
+                    await m.bot.send_message(aid, "Actions:", reply_markup=kb)
                 else:
-                    await m.bot.send_message(aid, f"درخواست شارژ #{pid}\nاز <a href=\"tg://user?id={m.from_user.id}\">{htmlesc(m.from_user.full_name or m.from_user.username or str(m.from_user.id))}</a>\nمبلغ: {amount:,}", reply_markup=kb, parse_mode=ParseMode.HTML)
+                    await m.bot.send_message(aid, f"New payment #{pid}\nFrom <a href=\"tg://user?id={m.from_user.id}\">{htmlesc(m.from_user.full_name or m.from_user.username or str(m.from_user.id))}</a>\nAmount: {amount:,}", reply_markup=kb, parse_mode=ParseMode.HTML)
             except Exception:
                 pass
-        await m.reply("درخواست شما ثبت شد. منتظر تأیید ادمین باشید.")
+        await m.reply("Payment submitted. Wait for admin approval.")
     else:
         await state.update_data(note=m.text or "")
-        await m.reply("توضیح ثبت شد. در پایان عبارت done را ارسال کنید.")
+        await m.reply("Note saved. Send 'done' when finished.")
 
 
 @router.callback_query(F.data.regexp(r"^admin:pending:(\d+)$"))
 async def admin_pending(cb: CallbackQuery):
     if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    m = re.match(r"^admin:pending:(\d+)$", cb.data or "")
-    page = int(m.group(1)) if m else 0
+        return await cb.answer("Access denied", show_alert=True)
+    import re
+
+    page = int(re.match(r"^admin:pending:(\d+)$", cb.data).group(1))
     limit = PAGE_SIZE_PAYMENTS
     offset = page * limit
     pend, total = db_list_pending_payments_page(offset, limit)
     if not pend:
-        await cb.message.edit_text("درخواستی در انتظار تأیید نیست.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")]]))
+        await cb.message.edit_text("درخواستی در انتظار تایید نیست.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")]]))
         return
-    rows = [[InlineKeyboardButton(text=f"#{p['id']} · {p['amount']:,} · کاربر {p['user_id']}", callback_data=f"payview:{p['id']}")] for p in pend]
+    rows = [[InlineKeyboardButton(text=f"#{p['id']} · {p['amount']:,} · user {p['user_id']}", callback_data=f"payview:{p['id']}")] for p in pend]
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="قبلی", callback_data=f"admin:pending:{page-1}"))
@@ -132,17 +134,17 @@ async def admin_pending(cb: CallbackQuery):
 @router.callback_query(F.data.startswith("payview:"))
 async def admin_pay_view(cb: CallbackQuery):
     if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+        return await cb.answer("Access denied", show_alert=True)
     pid = int(cb.data.split(":")[1])
     p = db_get_payment(pid)
     if not p:
-        return await cb.answer("یافت نشد")
+        return await cb.answer("Not found")
     u = cur.execute("SELECT * FROM users WHERE user_id=?", (p["user_id"],)).fetchone()
     nm = (" ".join(filter(None, [u and u["first_name"] or "", u and u["last_name"] or ""])) or (u and u["username"] or str(p["user_id"]))).strip()
     user_html = f'<a href="tg://user?id={p["user_id"]}">{htmlesc(nm)}</a>'
     caption = (
-        f"<b>درخواست #{p['id']}</b>\nکاربر: {user_html}\nمبلغ: <b>{p['amount']:,}</b>\n"
-        f"توضیح: {htmlesc(p['note'] or '-')}\nوضعیت: <b>{p['status']}</b>\nتاریخ: {p['created_at'][:19].replace('T',' ')}"
+        f"<b>Payment #{p['id']}</b>\nUser: {user_html}\nAmount: <b>{p['amount']:,}</b>\n"
+        f"Note: {htmlesc(p['note'] or '-')}\nStatus: <b>{p['status']}</b>\nAt: {p['created_at'][:19].replace('T',' ')}"
     )
     photos = json.loads(p.get("photos_json") or "[]")
 
@@ -150,7 +152,7 @@ async def admin_pay_view(cb: CallbackQuery):
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="تأیید ✅", callback_data=f"payok:{pid}"),
+                    InlineKeyboardButton(text="تایید ✅", callback_data=f"payok:{pid}"),
                     InlineKeyboardButton(text="رد ❌", callback_data=f"payno:{pid}"),
                 ],
                 [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin:pending:0")],
@@ -164,8 +166,8 @@ async def admin_pay_view(cb: CallbackQuery):
             pass
         await cb.bot.send_message(cb.from_user.id, caption, parse_mode=ParseMode.HTML)
         for ph in photos:
-            await cb.bot.send_photo(cb.from_user.id, ph, caption=f"درخواست #{p['id']}")
-        await cb.bot.send_message(cb.from_user.id, "اقدام:", reply_markup=kb(pid))
+            await cb.bot.send_photo(cb.from_user.id, ph, caption=f"Payment #{p['id']}")
+        await cb.bot.send_message(cb.from_user.id, "Actions:", reply_markup=kb(pid))
     else:
         await cb.message.edit_text(caption, reply_markup=kb(pid), parse_mode=ParseMode.HTML)
 
@@ -173,15 +175,15 @@ async def admin_pay_view(cb: CallbackQuery):
 @router.callback_query(F.data.startswith("payok:"))
 async def admin_pay_ok(cb: CallbackQuery):
     if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+        return await cb.answer("Access denied", show_alert=True)
     pid = int(cb.data.split(":")[1])
     row = db_get_payment(pid)
     if not row or row["status"] != "pending":
-        return await cb.answer("قبلاً رسیدگی شده")
+        return await cb.answer("Already handled")
     db_update_payment_status(pid, "approved")
     db_add_wallet(row["user_id"], row["amount"])
     try:
-        await cb.bot.send_message(row["user_id"], f"پرداخت شما {row['amount']:,} تأیید شد.")
+        await cb.bot.send_message(row["user_id"], f"Your payment {row['amount']:,} was approved.")
     except Exception:
         pass
     await admin_pending(cb)
@@ -190,15 +192,16 @@ async def admin_pay_ok(cb: CallbackQuery):
 @router.callback_query(F.data.startswith("payno:"))
 async def admin_pay_no(cb: CallbackQuery):
     if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+        return await cb.answer("Access denied", show_alert=True)
     pid = int(cb.data.split(":")[1])
     row = db_get_payment(pid)
     if not row or row["status"] != "pending":
-        return await cb.answer("قبلاً رسیدگی شده")
+        return await cb.answer("Already handled")
     db_update_payment_status(pid, "rejected")
     try:
-        await cb.bot.send_message(row["user_id"], f"پرداخت شما {row['amount']:,} رد شد.")
+        await cb.bot.send_message(row["user_id"], f"Your payment {row['amount']:,} was rejected.")
     except Exception:
         pass
     await admin_pending(cb)
+
 
