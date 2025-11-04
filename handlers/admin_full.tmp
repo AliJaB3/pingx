@@ -394,12 +394,6 @@ async def admin_template_edit_recv(m: Message, state: FSMContext):
 class SettingEdit(StatesGroup):
     waiting = State()
 
-class SettingNew(StatesGroup):
-    waiting = State()
-
-class TemplateNew(StatesGroup):
-    waiting = State()
-
 
 @router.callback_query(F.data == "admin:settings")
 async def admin_settings_stub_redirect(cb: CallbackQuery):
@@ -421,8 +415,6 @@ async def admin_settings(cb: CallbackQuery):
             [InlineKeyboardButton(text="Edit ACTIVE_INBOUND_ID", callback_data="admin2:s:edit:ACTIVE_INBOUND_ID")],
             [InlineKeyboardButton(text="Edit REQUIRED_CHANNEL", callback_data="admin2:s:edit:REQUIRED_CHANNEL")],
             [InlineKeyboardButton(text="Edit CARD_NUMBER", callback_data="admin2:s:edit:CARD_NUMBER")],
-            [InlineKeyboardButton(text="All Settings", callback_data="admin2:allsettings:0")],
-            [InlineKeyboardButton(text="All Templates", callback_data="admin2:alltpl:0")],
             [InlineKeyboardButton(text="Back", callback_data="admin")],
         ]
     )
@@ -460,122 +452,6 @@ async def admin_settings_edit_recv(m: Message, state: FSMContext):
     await m.reply("Setting updated.")
 
 
-# ---- Generic Settings Manager ----
-
-def list_settings_page(where_clause:str|None, where_arg:str|None, page:int, size:int):
-    off = page*size
-    if where_clause:
-        rows = cur.execute(f"SELECT key,value FROM settings WHERE {where_clause} ORDER BY key LIMIT ? OFFSET ?", (where_arg, size, off) if where_arg is not None else (size, off)).fetchall()
-        total = cur.execute(f"SELECT COUNT(1) FROM settings WHERE {where_clause}", (where_arg,) if where_arg is not None else ()).fetchone()[0]
-    else:
-        rows = cur.execute("SELECT key,value FROM settings ORDER BY key LIMIT ? OFFSET ?", (size, off)).fetchall()
-        total = cur.execute("SELECT COUNT(1) FROM settings").fetchone()[0]
-    return [dict(r) for r in rows], total
-
-
-def kb_settings_list(rows, page:int, total:int, size:int, base_cb:str):
-    kb=[]
-    for r in rows:
-        kb.append([InlineKeyboardButton(text=f"{r['key']}", callback_data=f"{base_cb}:edit:{r['key']}")])
-    nav=[]
-    if page>0: nav.append(InlineKeyboardButton(text="Prev", callback_data=f"{base_cb}:{page-1}"))
-    if (page+1)*size<total: nav.append(InlineKeyboardButton(text="Next", callback_data=f"{base_cb}:{page+1}"))
-    if nav: kb.append(nav)
-    if base_cb.startswith("admin2:alltpl"):
-        kb.append([InlineKeyboardButton(text="Add Template", callback_data="admin2:t:add")])
-    else:
-        kb.append([InlineKeyboardButton(text="Add Setting", callback_data="admin2:s:add")])
-    kb.append([InlineKeyboardButton(text="Back", callback_data="admin2:settings")])
-    return InlineKeyboardMarkup(inline_keyboard=kb)
-
-
-@router.callback_query(F.data.regexp(r"^admin2:allsettings:(\d+)$"))
-async def admin_all_settings(cb:CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
-    import re
-    page=int(re.match(r"^admin2:allsettings:(\d+)$", cb.data).group(1))
-    rows,total=list_settings_page(None,None,page,10)
-    await cb.message.edit_text("All Settings:", reply_markup=kb_settings_list(rows,page,total,10,"admin2:allsettings"))
-
-
-@router.callback_query(F.data.regexp(r"^admin2:alltpl:(\d+)$"))
-async def admin_all_templates(cb:CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
-    import re
-    page=int(re.match(r"^admin2:alltpl:(\d+)$", cb.data).group(1))
-    rows,total=list_settings_page("key LIKE ?","%TEMPLATE%",page,10)
-    await cb.message.edit_text("Templates:", reply_markup=kb_settings_list(rows,page,total,10,"admin2:alltpl"))
-
-
-@router.callback_query(F.data.regexp(r"^admin2:allsettings:edit:(.+)$"))
-async def admin_allsettings_edit(cb:CallbackQuery, state:FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
-    import re
-    key=re.match(r"^admin2:allsettings:edit:(.+)$", cb.data).group(1)
-    await state.set_state(SettingEdit.waiting)
-    await state.update_data(key=key)
-    curval = get_setting(key, "")
-    await cb.message.edit_text(f"Current value for {key}:\n\n{htmlesc(curval)}\n\nSend new value:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin2:allsettings:0")]]), parse_mode=ParseMode.HTML)
-
-
-@router.callback_query(F.data.regexp(r"^admin2:alltpl:edit:(.+)$"))
-async def admin_alltpl_edit(cb:CallbackQuery, state:FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
-    import re
-    key=re.match(r"^admin2:alltpl:edit:(.+)$", cb.data).group(1)
-    await state.set_state(TemplateEdit.waiting)
-    await state.update_data(key=key)
-    curval = get_setting(key, "")
-    await cb.message.edit_text(f"Current value for {key}:\n\n{htmlesc(curval)}\n\nSend new value (HTML allowed):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin2:alltpl:0")]]), parse_mode=ParseMode.HTML)
-
-
-@router.callback_query(F.data=="admin2:s:add")
-async def admin_setting_add(cb:CallbackQuery, state:FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
-    await state.set_state(SettingNew.waiting)
-    await cb.message.edit_text("Send new setting as key=value", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin2:allsettings:0")]]))
-
-
-@router.message(SettingNew.waiting)
-async def admin_setting_add_recv(m:Message, state:FSMContext):
-    txt=m.text or ""
-    if "=" not in txt:
-        return await m.reply("Use format key=value")
-    k, v = txt.split("=",1)
-    k=k.strip(); v=v.strip()
-    if not k:
-        return await m.reply("Invalid key")
-    set_setting(k, v)
-    await state.clear()
-    await m.reply("Saved.")
-
-
-@router.callback_query(F.data=="admin2:t:add")
-async def admin_template_add(cb:CallbackQuery, state:FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
-    await state.set_state(TemplateNew.waiting)
-    await cb.message.edit_text("Send new template as KEY_TEMPLATENAME=value (HTML allowed)", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin2:alltpl:0")]]))
-
-
-@router.message(TemplateNew.waiting)
-async def admin_template_add_recv(m:Message, state:FSMContext):
-    txt=m.text or ""
-    if "=" not in txt:
-        return await m.reply("Use format KEY=value")
-    k,v = txt.split("=",1)
-    k=k.strip(); v=v.strip()
-    if not k or "TEMPLATE" not in k:
-        return await m.reply("Key should contain TEMPLATE")
-    set_setting(k, v)
-    await state.clear(); await m.reply("Saved.")
-
-
 @router.callback_query(F.data == "admin:paneltest")
 async def admin_paneltest(cb: CallbackQuery):
     if cb.from_user.id not in ADMIN_IDS:
@@ -602,3 +478,5 @@ async def admin_paneltest(cb: CallbackQuery):
                 inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin")]]
             ),
         )
+
+
