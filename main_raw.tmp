@@ -21,11 +21,12 @@ async def main():
 
     asyncio.create_task(scheduler(bot))
 
-    print("PingX bot started (modular)." )
+    print(\"PingX bot started (modular).\" )
     await dp.start_polling(bot)
 
-if __name__=="__main__":
+if __name__==\"__main__\":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        print("Stopped.")
+        print(\"Stopped.\")
+
