@@ -11,6 +11,7 @@ from db import (
     list_tickets_page, list_ticket_messages_page, cur,
 )
 from utils import htmlesc
+from config import PAGE_SIZE_TICKETS
 
 router = Router()
 
@@ -156,7 +157,7 @@ async def user_ticket_pipeline(m: Message):
 @router.callback_query(F.data.regexp(r"^admin:tickets:(\d+)$"))
 async def admin_tickets_list(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
-        return await cb.answer("Access denied", show_alert=True)
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     import re
 
     page = int(re.match(r"^admin:tickets:(\d+)$", cb.data).group(1))
@@ -173,14 +174,14 @@ async def admin_tickets_list(cb: CallbackQuery):
         )
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="ظ‚ط¨ظ„غŒ", callback_data=f"admin:tickets:{page-1}"))
+        nav.append(InlineKeyboardButton(text="قبلی", callback_data=f"admin:tickets:{page-1}"))
     if (page + 1) * PAGE_SIZE_TICKETS < total:
-        nav.append(InlineKeyboardButton(text="ط¨ط¹ط¯غŒ", callback_data=f"admin:tickets:{page+1}"))
+        nav.append(InlineKeyboardButton(text="بعدی", callback_data=f"admin:tickets:{page+1}"))
     if nav:
         kb.append(nav)
-    kb.append([InlineKeyboardButton(text="ط¨ط§ط²ع¯ط´طھ â¬…ï¸ڈ", callback_data="admin")])
+    kb.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")])
     try:
-        await cb.message.edit_text("Tickets:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+        await cb.message.edit_text("تیکت‌ها:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
     except Exception:
         try:
             await cb.message.delete()
@@ -192,7 +193,7 @@ async def admin_tickets_list(cb: CallbackQuery):
 @router.callback_query(F.data.regexp(r"^adm:tkt:view:(\d+):(\d+)$"))
 async def admin_ticket_view(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
-        return await cb.answer("Access denied", show_alert=True)
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     import re
 
     m = re.match(r"^adm:tkt:view:(\d+):(\d+)$", cb.data)
@@ -233,7 +234,7 @@ async def admin_ticket_view(cb: CallbackQuery):
 @router.callback_query(F.data.regexp(r"^adm:tkt:close:(\d+)$"))
 async def admin_ticket_close(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
-        return await cb.answer("Access denied", show_alert=True)
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     import re
 
     tid = int(re.match(r"^adm:tkt:close:(\d+)$", cb.data).group(1))
@@ -253,7 +254,7 @@ async def admin_ticket_close(cb: CallbackQuery):
 @router.callback_query(F.data.regexp(r"^adm:tkt:reply:(\d+)$"))
 async def admin_ticket_reply(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
-        return await cb.answer("Access denied", show_alert=True)
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     import re
 
     tid = int(re.match(r"^adm:tkt:reply:(\d+)$", cb.data).group(1))
@@ -320,6 +321,9 @@ async def admin_reply_dispatch(m: Message, state: FSMContext):
         return
     await state.clear()
     await m.reply("Sent.")
+
+
+
 
 
 
