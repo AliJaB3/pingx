@@ -84,18 +84,18 @@ def kb_admin_users_list(rows, page: int, total: int, page_size: int, q: str | No
     if page > 0:
         nav.append(
             InlineKeyboardButton(
-                text="Prev", callback_data=f"admin:users:{page-1}:{q or ''}"
+                text="قبلی", callback_data=f"admin:users:{page-1}:{q or ''}"
             )
         )
     if (page + 1) * page_size < total:
         nav.append(
             InlineKeyboardButton(
-                text="Next", callback_data=f"admin:users:{page+1}:{q or ''}"
+                text="بعدی", callback_data=f"admin:users:{page+1}:{q or ''}"
             )
         )
     if nav:
         kb.append(nav)
-    kb.append([InlineKeyboardButton(text="Back", callback_data="admin")])
+    kb.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -110,10 +110,10 @@ async def admin_users(cb: CallbackQuery):
     offset = page * limit
     if q:
         rows, total = search_users_page(q, offset, limit)
-        header = f"Users (search: {htmlesc(q)}):"
+        header = f"کاربران (جستجو: {htmlesc(q)}):"
     else:
         rows, total = list_users_page(offset, limit)
-        header = "Users:"
+        header = "کاربران:"
     await cb.message.edit_text(
         header, reply_markup=kb_admin_users_list(rows, page, total, limit, q)
     )
@@ -128,22 +128,22 @@ async def admin_user_detail(cb: CallbackQuery):
     if not u:
         return await cb.answer("User not found")
     text = (
-        f"<b>User {uid}</b>\n"
-        f"Name: {(u['first_name'] or '')} {(u['last_name'] or '')}\n"
-        f"Username: @{u['username'] or '-'}\n"
-        f"Wallet: {u['wallet']:,}\n"
-        f"Created: {u['created_at'][:19].replace('T',' ')}"
+        f"<b>کاربر {uid}</b>\n"
+        f"نام: {(u['first_name'] or '')} {(u['last_name'] or '')}\n"
+        f"یوزرنیم: @{u['username'] or '-'}\n"
+        f"موجودی: {u['wallet']:,}\n"
+        f"تاریخ عضویت: {u['created_at'][:19].replace('T',' ')}"
     )
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Purchases", callback_data=f"admin:u:buys:{uid}")],
-            [InlineKeyboardButton(text="Usage", callback_data=f"admin:u:usage:{uid}")],
-            [InlineKeyboardButton(text="Grant trial7", callback_data=f"admin:u:trial7:{uid}")],
+            [InlineKeyboardButton(text="خریدها", callback_data=f"admin:u:buys:{uid}")],
+            [InlineKeyboardButton(text="مصرف", callback_data=f"admin:u:usage:{uid}")],
+            [InlineKeyboardButton(text="اعطای آزمایشی ۷روزه", callback_data=f"admin:u:trial7:{uid}")],
             [
                 InlineKeyboardButton(text="+50k", callback_data=f"admin:u:wallet:{uid}:+50000"),
                 InlineKeyboardButton(text="-50k", callback_data=f"admin:u:wallet:{uid}:-50000"),
             ],
-            [InlineKeyboardButton(text="Back", callback_data="admin:users:0:")],
+            [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin:users:0:")],
         ]
     )
     await cb.message.edit_text(text, reply_markup=kb, parse_mode=ParseMode.HTML)
@@ -182,7 +182,7 @@ async def admin_plans(cb: CallbackQuery):
             ]
         )
     kb.append([InlineKeyboardButton(text="Add Plan", callback_data="admin2:plan:add")])
-    kb.append([InlineKeyboardButton(text="Back", callback_data="admin")])
+    kb.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")])
     await cb.message.edit_text("Plans:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
 
@@ -247,7 +247,7 @@ def kb_plan_detail(p: dict):
                 )
             ],
             [InlineKeyboardButton(text="Delete", callback_data=f"admin2:plan:del:{p['id']}")],
-            [InlineKeyboardButton(text="Back", callback_data="admin2:plans")],
+            [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin2:plans")],
         ]
     )
 
@@ -358,7 +358,7 @@ async def admin_templates(cb: CallbackQuery):
         inline_keyboard=[
             [InlineKeyboardButton(text="Edit Welcome", callback_data="admin2:t:edit:WELCOME_TEMPLATE")],
             [InlineKeyboardButton(text="Edit PostPurchase", callback_data="admin2:t:edit:POST_PURCHASE_TEMPLATE")],
-            [InlineKeyboardButton(text="Back", callback_data="admin")],
+            [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")],
         ]
     )
     await cb.message.edit_text(txt, reply_markup=kb, parse_mode=ParseMode.HTML)
@@ -423,7 +423,7 @@ async def admin_settings(cb: CallbackQuery):
             [InlineKeyboardButton(text="Edit CARD_NUMBER", callback_data="admin2:s:edit:CARD_NUMBER")],
             [InlineKeyboardButton(text="All Settings", callback_data="admin2:allsettings:0")],
             [InlineKeyboardButton(text="All Templates", callback_data="admin2:alltpl:0")],
-            [InlineKeyboardButton(text="Back", callback_data="admin")],
+            [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")],
         ]
     )
     await cb.message.edit_text(txt, reply_markup=kb)
@@ -478,14 +478,14 @@ def kb_settings_list(rows, page:int, total:int, size:int, base_cb:str):
     for r in rows:
         kb.append([InlineKeyboardButton(text=f"{r['key']}", callback_data=f"{base_cb}:edit:{r['key']}")])
     nav=[]
-    if page>0: nav.append(InlineKeyboardButton(text="Prev", callback_data=f"{base_cb}:{page-1}"))
-    if (page+1)*size<total: nav.append(InlineKeyboardButton(text="Next", callback_data=f"{base_cb}:{page+1}"))
+    if page>0: nav.append(InlineKeyboardButton(text="قبلی", callback_data=f"{base_cb}:{page-1}"))
+    if (page+1)*size<total: nav.append(InlineKeyboardButton(text="بعدی", callback_data=f"{base_cb}:{page+1}"))
     if nav: kb.append(nav)
     if base_cb.startswith("admin2:alltpl"):
         kb.append([InlineKeyboardButton(text="Add Template", callback_data="admin2:t:add")])
     else:
         kb.append([InlineKeyboardButton(text="Add Setting", callback_data="admin2:s:add")])
-    kb.append([InlineKeyboardButton(text="Back", callback_data="admin2:settings")])
+    kb.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin2:settings")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -518,7 +518,7 @@ async def admin_allsettings_edit(cb:CallbackQuery, state:FSMContext):
     await state.set_state(SettingEdit.waiting)
     await state.update_data(key=key)
     curval = get_setting(key, "")
-    await cb.message.edit_text(f"Current value for {key}:\n\n{htmlesc(curval)}\n\nSend new value:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin2:allsettings:0")]]), parse_mode=ParseMode.HTML)
+    await cb.message.edit_text(f"Current value for {key}:\n\n{htmlesc(curval)}\n\nSend new value:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin2:allsettings:0")]]), parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data.regexp(r"^admin2:alltpl:edit:(.+)$"))
@@ -530,7 +530,7 @@ async def admin_alltpl_edit(cb:CallbackQuery, state:FSMContext):
     await state.set_state(TemplateEdit.waiting)
     await state.update_data(key=key)
     curval = get_setting(key, "")
-    await cb.message.edit_text(f"Current value for {key}:\n\n{htmlesc(curval)}\n\nSend new value (HTML allowed):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin2:alltpl:0")]]), parse_mode=ParseMode.HTML)
+    await cb.message.edit_text(f"Current value for {key}:\n\n{htmlesc(curval)}\n\nSend new value (HTML allowed):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin2:alltpl:0")]]), parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data=="admin2:s:add")
@@ -538,7 +538,7 @@ async def admin_setting_add(cb:CallbackQuery, state:FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     await state.set_state(SettingNew.waiting)
-    await cb.message.edit_text("Send new setting as key=value", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin2:allsettings:0")]]))
+    await cb.message.edit_text("Send new setting as key=value", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin2:allsettings:0")]]))
 
 
 @router.message(SettingNew.waiting)
@@ -560,7 +560,7 @@ async def admin_template_add(cb:CallbackQuery, state:FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     await state.set_state(TemplateNew.waiting)
-    await cb.message.edit_text("Send new template as KEY_TEMPLATENAME=value (HTML allowed)", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin2:alltpl:0")]]))
+    await cb.message.edit_text("Send new template as KEY_TEMPLATENAME=value (HTML allowed)", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin2:alltpl:0")]]))
 
 
 @router.message(TemplateNew.waiting)
@@ -584,7 +584,7 @@ async def admin_paneltest(cb: CallbackQuery):
         return await cb.message.edit_text(
             "3x-ui session not configured.",
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin")]]
+                inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")]]
             ),
         )
     try:
@@ -592,14 +592,14 @@ async def admin_paneltest(cb: CallbackQuery):
         await cb.message.edit_text(
             f"Panel reachable. Inbounds: {len(ibs)}",
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin")]]
+                inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")]]
             ),
         )
     except Exception as e:
         await cb.message.edit_text(
             f"Panel error: {e}",
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin")]]
+                inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")]]
             ),
         )
 
@@ -677,7 +677,7 @@ async def admin_dashboard(cb:CallbackQuery):
         labels.append(d[5:])
         values.append(cnt.get(d,0))
     total_users = cur.execute("SELECT COUNT(1) FROM users").fetchone()[0]
-    # Purchases last 7 days
+    # خریدها last 7 days
     rows2 = cur.execute("SELECT created_at FROM purchases").fetchall()
     days2 = [(str(r[0])[:10]) for r in rows2]
     cnt2 = Counter(days2)
@@ -717,3 +717,4 @@ async def admin_dashboard(cb:CallbackQuery):
         f"🛰️ وضعیت این‌باندها: {ib_txt}"
     )
     await cb.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")]]))
+
