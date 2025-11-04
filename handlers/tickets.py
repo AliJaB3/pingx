@@ -1,9 +1,9 @@
-\
 from aiogram import Router, F
 from aiogram.enums import ParseMode
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter
 from config import ADMIN_IDS, PAGE_SIZE_TICKETS
 from db import (get_or_open_ticket, ticket_close, ticket_set_activity, store_tmsg,
                 list_tickets_page, list_ticket_messages_page, cur)
@@ -42,7 +42,7 @@ async def user_ticket_close(cb:CallbackQuery):
         except: pass
     await cb.message.edit_text(\"تیکت بسته شد.\", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=\"🆘 بازکردن تیکت جدید\", callback_data=\"support\")],[InlineKeyboardButton(text=\"⬅️ خانه\", callback_data=\"home\")]]))
 
-@router.message()
+@router.message(StateFilter(None))
 async def user_ticket_pipeline(m:Message):
     if m.text and m.text.startswith(\"/\"): return
     t=cur.execute(\"SELECT id FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1\",(m.from_user.id,)).fetchone()

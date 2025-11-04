@@ -92,7 +92,7 @@ class ThreeXUISession:
                 if total>0 and int(v.get("total") or 0)==0: v["total"]=total; need=True
                 if need:
                     await self.update_client(inbound_id, v["id"], v)
-                v=await self._verify_client_added(inbound_id, email=email, client_id=v["id'])
+                v=await self._verify_client_added(inbound_id, email=email, client_id=v["id"])
                 if v: return {"client": v}
         except Exception as e:
             last_err=e

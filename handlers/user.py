@@ -1,8 +1,7 @@
-\
 from aiogram import Router, F
 from aiogram.enums import ParseMode, ChatMemberStatus
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery, InputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InputFile, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from config import ADMIN_IDS, REQUIRED_CHANNEL, CARD_NUMBER, MAX_RECEIPT_MB, MAX_RECEIPT_PHOTOS
 from keyboards import kb_main, kb_force_join, kb_plans, kb_mysubs, kb_sub_detail
 from db import (save_or_update_user, db_get_wallet, db_get_plans_for_user, db_get_plan, try_deduct_wallet, rollback_wallet,

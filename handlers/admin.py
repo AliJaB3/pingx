@@ -1,4 +1,3 @@
-\
 import re, json, secrets
 from aiogram import Router, F
 from aiogram.enums import ParseMode

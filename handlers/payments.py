@@ -1,10 +1,9 @@
-\
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ParseMode
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from config import CARD_NUMBER, MAX_RECEIPT_PHOTOS, ADMIN_IDS, PAGE_SIZE_PAYMENTS
+from config import CARD_NUMBER, MAX_RECEIPT_PHOTOS, MAX_RECEIPT_MB, ADMIN_IDS, PAGE_SIZE_PAYMENTS
 from db import db_get_wallet, db_new_payment, db_get_payment, db_add_wallet, db_update_payment_status, db_list_pending_payments_page, cur
 from keyboards import kb_admin_root
 from utils import htmlesc
@@ -47,6 +46,13 @@ async def collect_photo(m:Message, state:FSMContext):
     s=await state.get_state()
     if not s or \"Topup\" not in s: return
     data=await state.get_data(); photos=data.get(\"photos\",[])
+    # Enforce maximum per-photo size
+    try:
+        sz = int(m.photo[-1].file_size or 0)
+        if sz > int(MAX_RECEIPT_MB)*1024*1024:
+            await m.reply(\"حجم عکس رسید بیشتر از حد مجاز است.\"); return
+    except Exception:
+        pass
     if len(photos) >= MAX_RECEIPT_PHOTOS:
         await m.reply(\"حداکثر تعداد عکس رسید به حد نصاب رسیده است.\"); return
     photos.append(m.photo[-1].file_id); await state.update_data(photos=photos)
