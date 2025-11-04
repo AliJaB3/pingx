@@ -287,3 +287,42 @@ async def sub_stat_refresh(cb: CallbackQuery):
 
 
 
+
+@router.callback_query(F.data == "recheck_join")
+async def recheck_join(cb: CallbackQuery):
+    # Re-evaluate membership and route to home or show prompt
+    if getattr(cb.message.chat, "type", "private") != "private":
+        return
+    # Reuse existing welcome/home flow
+    from db import get_setting
+    from keyboards import kb_main, kb_force_join
+    from config import REQUIRED_CHANNEL
+    try:
+        # Try to show home if passed middleware
+        bal = db_get_wallet(cb.from_user.id)
+        welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌اِکس خوش آمدید!")
+        await cb.message.edit_text(welcome + f"\n\nموجودی شما: <b>{bal:,}</b>", reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)), parse_mode=ParseMode.HTML)
+    except Exception:
+        await cb.message.edit_text("برای استفاده از ربات، ابتدا در کانال عضو شوید.", reply_markup=kb_force_join(get_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)))
+
+
+@router.message()
+async def fallback_main_menu(m: Message, state: FSMContext):
+    # Private only
+    if getattr(m.chat, "type", "private") != "private":
+        return
+    # Skip commands
+    if m.text and str(m.text).startswith("/"):
+        return
+    # Skip if in FSM states (e.g., Topup)
+    s = await state.get_state()
+    if s:
+        return
+    # Skip if user has open ticket (tickets router will handle)
+    row = cur.execute("SELECT 1 FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1", (m.from_user.id,)).fetchone()
+    if row:
+        return
+    # Show main menu
+    bal = db_get_wallet(m.from_user.id)
+    welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌اِکس خوش آمدید!")
+    await m.answer(welcome + f"\n\nموجودی شما: <b>{bal:,}</b>", reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)), parse_mode=ParseMode.HTML)

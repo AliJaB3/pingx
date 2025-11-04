@@ -9,11 +9,13 @@ from handlers import payments as payment_handlers
 from handlers import tickets as ticket_handlers
 from handlers import admin as admin_handlers
 from scheduler import scheduler
+from middlewares.force_join import ForceJoinMiddleware
 
 async def main():
     migrate(); ensure_defaults(); ensure_default_plans()
     bot=Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp=Dispatcher()
+    dp.update.middleware(ForceJoinMiddleware())
 
     dp.include_router(user_handlers.router)
     dp.include_router(payment_handlers.router)
