@@ -94,7 +94,7 @@ async def buy_confirm(cb:CallbackQuery):
                     client_email=email, sub_id=sub_id, sub_link=sub_link,
                     allocated_gb=allocated_gb, expiry_ms=expiry_ms, meta=None)
     try:
-        await cb.bot.send_photo(cb.from_user.id, InputFile(qr_bytes(sub_link), filename=\"pingx.png\"), caption=\"✅ اشتراک شما فعال شد. QR را اسکن کنید.\")
+        await cb.bot.send_photo(cb.from_user.id, BufferedInputFile(qr_bytes(sub_link).getvalue(), filename=\"pingx.png\"), caption=\"✅ اشتراک شما فعال شد. QR را اسکن کنید.\")
         await cb.bot.send_message(cb.from_user.id, f\"🔗 <a href=\\\"{htmlesc(sub_link)}\\\">Open Subscribe</a>\\n<code>{sub_link}</code>\", parse_mode=ParseMode.HTML)
     except: pass
     extra=get_setting(\"POST_PURCHASE_TEMPLATE\",\"\").strip()
@@ -133,7 +133,7 @@ async def sub_fix_link(cb:CallbackQuery):
     if not r or r[\"user_id\"]!=cb.from_user.id: return await cb.answer(\"یافت نشد\")
     link=build_subscribe_url(r[\"sub_id\"]) if r[\"sub_id\"] else r[\"sub_link\"]
     try:
-        await cb.bot.send_photo(cb.from_user.id, InputFile(qr_bytes(link), filename=f\"pingx-{pid}.png\"), caption=\"🔗 لینک/QR شما:\")
+        await cb.bot.send_photo(cb.from_user.id, BufferedInputFile(qr_bytes(link).getvalue(), filename=f\"pingx-{pid}.png\"), caption=\"🔗 لینک/QR شما:\")
     except: pass
     await cb.bot.send_message(cb.from_user.id, f\"<a href=\\\"{htmlesc(link)}\\\">Open Subscribe</a>\\n<code>{link}</code>\", parse_mode=ParseMode.HTML)
     await cb.answer(\"ارسال شد\")
