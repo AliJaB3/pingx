@@ -178,6 +178,23 @@ def db_get_plan(pid:str):
     r=cur.execute("SELECT * FROM plans WHERE id=?", (pid,)).fetchone()
     return dict(r) if r else None
 
+def db_list_plans():
+    return [dict(r) for r in cur.execute("SELECT * FROM plans ORDER BY id").fetchall()]
+
+def db_insert_plan(pid:str, title:str, days:int, gb:int, price:int, flags:dict|None=None):
+    cur.execute(
+        "INSERT INTO plans(id,title,days,gb,price,flags) VALUES(?,?,?,?,?,?)",
+        (pid, title, int(days), int(gb), int(price), json.dumps(flags or {}, ensure_ascii=False)),
+    )
+
+def db_update_plan_field(pid:str, field:str, value):
+    if field not in ("title","days","gb","price","flags"):
+        raise ValueError("invalid field")
+    cur.execute(f"UPDATE plans SET {field}=? WHERE id=?", (value, pid))
+
+def db_delete_plan(pid:str):
+    cur.execute("DELETE FROM plans WHERE id=?", (pid,))
+
 def db_get_plans_for_user(is_admin:bool):
     rows=[dict(r) for r in cur.execute("SELECT * FROM plans ORDER BY id").fetchall()]
     res=[]
