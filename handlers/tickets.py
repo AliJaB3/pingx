@@ -1,11 +1,11 @@
-from aiogram import Router, F
+﻿from aiogram import Router, F
 from aiogram.enums import ParseMode
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 
-from config import ADMIN_IDS, PAGE_SIZE_TICKETS
+from db import is_admin, get_admin_ids
 from db import (
     get_or_open_ticket, ticket_close, ticket_set_activity, store_tmsg,
     list_tickets_page, list_ticket_messages_page, cur,
@@ -22,8 +22,8 @@ class AdminReply(StatesGroup):
 def kb_ticket_user():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="بستن تیکت", callback_data="ticket:close")],
-            [InlineKeyboardButton(text="خانه 🏠", callback_data="home")],
+            [InlineKeyboardButton(text="ط¨ط³طھظ† طھغŒع©طھ", callback_data="ticket:close")],
+            [InlineKeyboardButton(text="ط®ط§ظ†ظ‡ ًںڈ ", callback_data="home")],
         ]
     )
 
@@ -46,7 +46,7 @@ async def user_support(cb: CallbackQuery):
         )
     else:
         tid = get_or_open_ticket(cb.from_user.id)
-        for aid in ADMIN_IDS:
+        for aid in get_admin_ids():
             try:
                 await cb.bot.send_message(
                     aid,
@@ -75,17 +75,17 @@ async def user_ticket_close(cb: CallbackQuery):
     if not row:
         return await cb.answer("No open ticket.", show_alert=True)
     ticket_close(row["id"])
-    for aid in ADMIN_IDS:
+    for aid in get_admin_ids():
         try:
             await cb.bot.send_message(aid, f"Ticket #{row['id']} closed by user.")
         except Exception:
             pass
         await cb.message.edit_text(
-            "تیکت بسته شد.",
+            "طھغŒع©طھ ط¨ط³طھظ‡ ط´ط¯.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="ایجاد تیکت جدید", callback_data="support")],
-                    [InlineKeyboardButton(text="خانه 🏠", callback_data="home")],
+                    [InlineKeyboardButton(text="ط§غŒط¬ط§ط¯ طھغŒع©طھ ط¬ط¯غŒط¯", callback_data="support")],
+                    [InlineKeyboardButton(text="ط®ط§ظ†ظ‡ ًںڈ ", callback_data="home")],
                 ]
             ),
         )
@@ -112,13 +112,13 @@ async def user_ticket_pipeline(m: Message):
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="پاسخ ✍️", callback_data=f"adm:tkt:reply:{tid}"),
-                InlineKeyboardButton(text="بستن 🔒", callback_data=f"adm:tkt:close:{tid}"),
+                InlineKeyboardButton(text="ظ¾ط§ط³ط® âœچï¸ڈ", callback_data=f"adm:tkt:reply:{tid}"),
+                InlineKeyboardButton(text="ط¨ط³طھظ† ًں”’", callback_data=f"adm:tkt:close:{tid}"),
             ],
-            [InlineKeyboardButton(text="نمایش سابقه", callback_data=f"adm:tkt:view:{tid}:0")],
+            [InlineKeyboardButton(text="ظ†ظ…ط§غŒط´ ط³ط§ط¨ظ‚ظ‡", callback_data=f"adm:tkt:view:{tid}:0")],
         ]
     )
-    for aid in ADMIN_IDS:
+    for aid in get_admin_ids():
         try:
             if m.photo:
                 sent = await m.bot.send_photo(
@@ -155,7 +155,7 @@ async def user_ticket_pipeline(m: Message):
 
 @router.callback_query(F.data.regexp(r"^admin:tickets:(\d+)$"))
 async def admin_tickets_list(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
+    if not is_admin(cb.from_user.id):
         return await cb.answer("Access denied", show_alert=True)
     import re
 
@@ -166,19 +166,19 @@ async def admin_tickets_list(cb: CallbackQuery):
         kb.append(
             [
                 InlineKeyboardButton(
-                    text=f"#{t['id']} · {t['status']} · user {t['user_id']}",
+                    text=f"#{t['id']} آ· {t['status']} آ· user {t['user_id']}",
                     callback_data=f"adm:tkt:view:{t['id']}:0",
                 )
             ]
         )
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="قبلی", callback_data=f"admin:tickets:{page-1}"))
+        nav.append(InlineKeyboardButton(text="ظ‚ط¨ظ„غŒ", callback_data=f"admin:tickets:{page-1}"))
     if (page + 1) * PAGE_SIZE_TICKETS < total:
-        nav.append(InlineKeyboardButton(text="بعدی", callback_data=f"admin:tickets:{page+1}"))
+        nav.append(InlineKeyboardButton(text="ط¨ط¹ط¯غŒ", callback_data=f"admin:tickets:{page+1}"))
     if nav:
         kb.append(nav)
-    kb.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")])
+    kb.append([InlineKeyboardButton(text="ط¨ط§ط²ع¯ط´طھ â¬…ï¸ڈ", callback_data="admin")])
     try:
         await cb.message.edit_text("Tickets:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
     except Exception:
@@ -191,7 +191,7 @@ async def admin_tickets_list(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^adm:tkt:view:(\d+):(\d+)$"))
 async def admin_ticket_view(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
+    if not is_admin(cb.from_user.id):
         return await cb.answer("Access denied", show_alert=True)
     import re
 
@@ -208,18 +208,18 @@ async def admin_ticket_view(cb: CallbackQuery):
             txt.append(f"{who}: [{r['kind']}] {htmlesc(r.get('caption') or '')}")
     kb = [
         [
-            InlineKeyboardButton(text="پاسخ ✍️", callback_data=f"adm:tkt:reply:{tid}"),
-            InlineKeyboardButton(text="بستن 🔒", callback_data=f"adm:tkt:close:{tid}"),
+            InlineKeyboardButton(text="ظ¾ط§ط³ط® âœچï¸ڈ", callback_data=f"adm:tkt:reply:{tid}"),
+            InlineKeyboardButton(text="ط¨ط³طھظ† ًں”’", callback_data=f"adm:tkt:close:{tid}"),
         ]
     ]
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="قبلی", callback_data=f"adm:tkt:view:{tid}:{page-1}"))
+        nav.append(InlineKeyboardButton(text="ظ‚ط¨ظ„غŒ", callback_data=f"adm:tkt:view:{tid}:{page-1}"))
     if (page + 1) * 10 < total:
-        nav.append(InlineKeyboardButton(text="بعدی", callback_data=f"adm:tkt:view:{tid}:{page+1}"))
+        nav.append(InlineKeyboardButton(text="ط¨ط¹ط¯غŒ", callback_data=f"adm:tkt:view:{tid}:{page+1}"))
     if nav:
         kb.append(nav)
-    kb.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin:tickets:0")])
+    kb.append([InlineKeyboardButton(text="ط¨ط§ط²ع¯ط´طھ â¬…ï¸ڈ", callback_data="admin:tickets:0")])
     try:
         await cb.message.edit_text("\n".join(txt), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode=ParseMode.HTML)
     except Exception:
@@ -232,7 +232,7 @@ async def admin_ticket_view(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^adm:tkt:close:(\d+)$"))
 async def admin_ticket_close(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
+    if not is_admin(cb.from_user.id):
         return await cb.answer("Access denied", show_alert=True)
     import re
 
@@ -252,7 +252,7 @@ async def admin_ticket_close(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^adm:tkt:reply:(\d+)$"))
 async def admin_ticket_reply(cb: CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
+    if not is_admin(cb.from_user.id):
         return await cb.answer("Access denied", show_alert=True)
     import re
 
@@ -267,7 +267,7 @@ async def admin_ticket_reply(cb: CallbackQuery, state: FSMContext):
         await cb.message.edit_text(
             prompt,
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data=f"adm:tkt:view:{tid}:0")]]
+                inline_keyboard=[[InlineKeyboardButton(text="ط¨ط§ط²ع¯ط´طھ â¬…ï¸ڈ", callback_data=f"adm:tkt:view:{tid}:0")]]
             ),
         )
     except Exception:
@@ -279,7 +279,7 @@ async def admin_ticket_reply(cb: CallbackQuery, state: FSMContext):
             cb.from_user.id,
             prompt,
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="بازگشت ⬅️", callback_data=f"adm:tkt:view:{tid}:0")]]
+                inline_keyboard=[[InlineKeyboardButton(text="ط¨ط§ط²ع¯ط´طھ â¬…ï¸ڈ", callback_data=f"adm:tkt:view:{tid}:0")]]
             ),
         )
 
@@ -320,3 +320,7 @@ async def admin_reply_dispatch(m: Message, state: FSMContext):
         return
     await state.clear()
     await m.reply("Sent.")
+
+
+
+

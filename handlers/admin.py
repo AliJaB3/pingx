@@ -1,11 +1,11 @@
-import re, json, secrets
+﻿import re, json, secrets
 from aiogram import Router, F
 from aiogram.enums import ParseMode
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
-from config import ADMIN_IDS, PAGE_SIZE_USERS
+from db import is_admin, get_admin_ids
 from keyboards import kb_admin_root
 from db import (
     cur,
@@ -24,9 +24,9 @@ router = Router()
 
 @router.callback_query(F.data == "admin")
 async def admin_menu(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    await cb.message.edit_text("پنل ادمین:", reply_markup=kb_admin_root())
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("ط¯ط³طھط±ط³غŒ ط؛غŒط±ظ…ط¬ط§ط²", show_alert=True)
+    await cb.message.edit_text("ظ¾ظ†ظ„ ط§ط¯ظ…غŒظ†:", reply_markup=kb_admin_root())
 
 
 def search_users_page(q: str, offset: int, limit: int):
@@ -75,7 +75,7 @@ def kb_admin_users_list(rows, page: int, total: int, page_size: int, q: str | No
         kb.append(
             [
                 InlineKeyboardButton(
-                    text=f"{name} ({r['user_id']}) · {r['wallet']:,}",
+                    text=f"{name} ({r['user_id']}) آ· {r['wallet']:,}",
                     callback_data=f"admin:u:{r['user_id']}",
                 )
             ]
@@ -101,8 +101,8 @@ def kb_admin_users_list(rows, page: int, total: int, page_size: int, q: str | No
 
 @router.callback_query(F.data.regexp(r"^admin:users:(\d+):(.*)$"))
 async def admin_users(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     m = re.match(r"^admin:users:(\d+):(.*)$", cb.data)
     page = int(m.group(1))
     q = (m.group(2) or "").strip()
@@ -121,8 +121,8 @@ async def admin_users(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^admin:u:(\d+)$"))
 async def admin_user_detail(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     uid = int(re.match(r"^admin:u:(\d+)$", cb.data).group(1))
     u = cur.execute("SELECT * FROM users WHERE user_id=?", (uid,)).fetchone()
     if not u:
@@ -168,8 +168,8 @@ async def admin_plans_stub_redirect(cb: CallbackQuery):
 
 @router.callback_query(F.data == "admin2:plans")
 async def admin_plans(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     plans = db_list_plans()
     kb = []
     for p in plans:
@@ -188,8 +188,8 @@ async def admin_plans(cb: CallbackQuery):
 
 @router.callback_query(F.data == "admin2:plan:add")
 async def admin_plan_add(cb: CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     await state.set_state(PlanNew.waiting)
     await cb.message.edit_text(
         "Send new plan as: id | title | days | gb | price",
@@ -254,8 +254,8 @@ def kb_plan_detail(p: dict):
 
 @router.callback_query(F.data.regexp(r"^admin2:plan:([^:]+)$"))
 async def admin_plan_view(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     pid = re.match(r"^admin2:plan:([^:]+)$", cb.data).group(1)
     p = db_get_plan(pid)
     if not p:
@@ -274,8 +274,8 @@ async def admin_plan_view(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^admin2:plan:edit:([^:]+):(title|days|gb|price)$"))
 async def admin_plan_edit(cb: CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     m = re.match(r"^admin2:plan:edit:([^:]+):(title|days|gb|price)$", cb.data)
     pid = m.group(1)
     field = m.group(2)
@@ -309,8 +309,8 @@ async def admin_plan_edit_recv(m: Message, state: FSMContext):
 
 @router.callback_query(F.data.regexp(r"^admin2:plan:flag:([^:]+):(admin_only|test)$"))
 async def admin_plan_toggle_flag(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     m = re.match(r"^admin2:plan:flag:([^:]+):(admin_only|test)$", cb.data)
     pid = m.group(1)
     flag = m.group(2)
@@ -328,8 +328,8 @@ async def admin_plan_toggle_flag(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^admin2:plan:del:([^:]+)$"))
 async def admin_plan_delete(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     pid = re.match(r"^admin2:plan:del:([^:]+)$", cb.data).group(1)
     db_delete_plan(pid)
     await admin_plans(cb)
@@ -349,8 +349,8 @@ async def admin_templates_stub_redirect(cb: CallbackQuery):
 
 @router.callback_query(F.data == "admin2:templates")
 async def admin_templates(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     w = get_setting("WELCOME_TEMPLATE", "(empty)")
     p = get_setting("POST_PURCHASE_TEMPLATE", "(empty)")
     txt = f"Templates:\nWELCOME_TEMPLATE:\n{w}\n\nPOST_PURCHASE_TEMPLATE:\n{p}"
@@ -366,8 +366,8 @@ async def admin_templates(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^admin2:t:edit:(WELCOME_TEMPLATE|POST_PURCHASE_TEMPLATE)$"))
 async def admin_template_edit(cb: CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     key = re.match(r"^admin2:t:edit:(WELCOME_TEMPLATE|POST_PURCHASE_TEMPLATE)$", cb.data).group(1)
     await state.set_state(TemplateEdit.waiting)
     await state.update_data(key=key)
@@ -408,8 +408,8 @@ async def admin_settings_stub_redirect(cb: CallbackQuery):
 
 @router.callback_query(F.data == "admin2:settings")
 async def admin_settings(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     active = get_setting("ACTIVE_INBOUND_ID", "-")
     req_ch = get_setting("REQUIRED_CHANNEL", "-")
     card = get_setting("CARD_NUMBER", "-")
@@ -431,8 +431,8 @@ async def admin_settings(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^admin2:s:edit:(ACTIVE_INBOUND_ID|REQUIRED_CHANNEL|CARD_NUMBER)$"))
 async def admin_settings_edit(cb: CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     key = re.match(r"^admin2:s:edit:(ACTIVE_INBOUND_ID|REQUIRED_CHANNEL|CARD_NUMBER)$", cb.data).group(1)
     await state.set_state(SettingEdit.waiting)
     await state.update_data(key=key)
@@ -491,8 +491,8 @@ def kb_settings_list(rows, page:int, total:int, size:int, base_cb:str):
 
 @router.callback_query(F.data.regexp(r"^admin2:allsettings:(\d+)$"))
 async def admin_all_settings(cb:CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     import re
     page=int(re.match(r"^admin2:allsettings:(\d+)$", cb.data).group(1))
     rows,total=list_settings_page(None,None,page,10)
@@ -501,8 +501,8 @@ async def admin_all_settings(cb:CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^admin2:alltpl:(\d+)$"))
 async def admin_all_templates(cb:CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     import re
     page=int(re.match(r"^admin2:alltpl:(\d+)$", cb.data).group(1))
     rows,total=list_settings_page("key LIKE ?","%TEMPLATE%",page,10)
@@ -511,8 +511,8 @@ async def admin_all_templates(cb:CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^admin2:allsettings:edit:(.+)$"))
 async def admin_allsettings_edit(cb:CallbackQuery, state:FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     import re
     key=re.match(r"^admin2:allsettings:edit:(.+)$", cb.data).group(1)
     await state.set_state(SettingEdit.waiting)
@@ -523,8 +523,8 @@ async def admin_allsettings_edit(cb:CallbackQuery, state:FSMContext):
 
 @router.callback_query(F.data.regexp(r"^admin2:alltpl:edit:(.+)$"))
 async def admin_alltpl_edit(cb:CallbackQuery, state:FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     import re
     key=re.match(r"^admin2:alltpl:edit:(.+)$", cb.data).group(1)
     await state.set_state(TemplateEdit.waiting)
@@ -535,8 +535,8 @@ async def admin_alltpl_edit(cb:CallbackQuery, state:FSMContext):
 
 @router.callback_query(F.data=="admin2:s:add")
 async def admin_setting_add(cb:CallbackQuery, state:FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     await state.set_state(SettingNew.waiting)
     await cb.message.edit_text("Send new setting as key=value", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin2:allsettings:0")]]))
 
@@ -557,8 +557,8 @@ async def admin_setting_add_recv(m:Message, state:FSMContext):
 
 @router.callback_query(F.data=="admin2:t:add")
 async def admin_template_add(cb:CallbackQuery, state:FSMContext):
-    if cb.from_user.id not in ADMIN_IDS:
-        return await cb.answer("Access denied", show_alert=True)
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     await state.set_state(TemplateNew.waiting)
     await cb.message.edit_text("Send new template as KEY_TEMPLATENAME=value (HTML allowed)", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin2:alltpl:0")]]))
 
@@ -578,7 +578,7 @@ async def admin_template_add_recv(m:Message, state:FSMContext):
 
 @router.callback_query(F.data == "admin:paneltest")
 async def admin_paneltest(cb: CallbackQuery):
-    if cb.from_user.id not in ADMIN_IDS:
+    if not is_admin(cb.from_user.id):
         return
     if not three_session:
         return await cb.message.edit_text(
@@ -602,3 +602,59 @@ async def admin_paneltest(cb: CallbackQuery):
                 inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="admin")]]
             ),
         )
+
+
+
+
+# --- Admins management ---
+class AdminEdit(StatesGroup):
+    add = State()
+    remove = State()
+
+def kb_admins(ids:list[int], page:int=0, page_size:int=20):
+    start=page*page_size; chunk=ids[start:start+page_size]
+    kb=[]
+    for uid in chunk:
+        kb.append([InlineKeyboardButton(text=f"🛡️ {uid}", callback_data=f"admin:admins:remove:{uid}")])
+    kb.append([InlineKeyboardButton(text="➕ افزودن ادمین", callback_data="admin:admins:add")])
+    kb.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+@router.callback_query(F.data.regexp(r"^admin:admins:(\d+)$"))
+async def admin_admins_list(cb:CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    import re
+    page=int(re.match(r"^admin:admins:(\d+)$", cb.data).group(1))
+    ids=sorted(list(get_admin_ids()))
+    await cb.message.edit_text("مدیریت ادمین‌ها:", reply_markup=kb_admins(ids,page))
+
+@router.callback_query(F.data=="admin:admins:add")
+async def admin_admins_add(cb:CallbackQuery, state:FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    await state.set_state(AdminEdit.add)
+    await cb.message.edit_text("آیدی عددی تلگرام کاربر را ارسال کنید:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:admins:0")]]))
+
+@router.message(AdminEdit.add)
+async def admin_admins_add_recv(m:Message, state:FSMContext):
+    try:
+        uid=int(str(m.text).strip())
+    except:
+        return await m.reply("عدد نامعتبر است.")
+    add_admin(uid)
+    await state.clear()
+    await m.reply(f"کاربر {uid} به فهرست ادمین‌ها افزوده شد.")
+
+@router.callback_query(F.data.regexp(r"^admin:admins:remove:(\d+)$"))
+async def admin_admins_remove(cb:CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    import re
+    uid=int(re.match(r"^admin:admins:remove:(\d+)$", cb.data).group(1))
+    remove_admin(uid)
+    await cb.answer("حذف شد")
+    await admin_admins_list(cb)
+
+
+

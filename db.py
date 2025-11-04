@@ -1,6 +1,6 @@
 import sqlite3, json
 from datetime import datetime, timezone
-from config import DB_PATH, CARD_NUMBER, REQUIRED_CHANNEL, THREEXUI_INBOUND_ID
+from config import DB_PATH, CARD_NUMBER, REQUIRED_CHANNEL, THREEXUI_INBOUND_ID, ADMIN_IDS as CONF_ADMIN_IDS
 from utils import now_iso
 
 TZ = timezone.utc
@@ -105,6 +105,38 @@ def set_setting(k,v): cur.execute("INSERT OR REPLACE INTO settings(key,value) VA
 def get_setting(k, default=None):
     r=cur.execute("SELECT value FROM settings WHERE key=?", (k,)).fetchone()
     return (r and r[0]) or default
+
+# --- Admin helpers ---
+def _parse_ids_csv(csv_str:str|None)->set[int]:
+    if not csv_str: return set()
+    parts=[x.strip() for x in str(csv_str).replace(" ","").split(",") if x.strip()]
+    res=set()
+    for p in parts:
+        try: res.add(int(p))
+        except: continue
+    return res
+
+def get_admin_ids()->set[int]:
+    extra=_parse_ids_csv(get_setting("ADMIN_IDS",""))
+    base=set(int(x) for x in (CONF_ADMIN_IDS or set()))
+    return base.union(extra)
+
+def is_admin(uid:int)->bool:
+    try: uid=int(uid)
+    except: return False
+    return uid in get_admin_ids()
+
+def add_admin(uid:int):
+    s=get_setting("ADMIN_IDS","") or ""
+    ids=_parse_ids_csv(s)
+    ids.add(int(uid))
+    set_setting("ADMIN_IDS", ",".join(str(x) for x in sorted(ids)))
+
+def remove_admin(uid:int):
+    s=get_setting("ADMIN_IDS","") or ""
+    ids=_parse_ids_csv(s)
+    if int(uid) in ids: ids.remove(int(uid))
+    set_setting("ADMIN_IDS", ",".join(str(x) for x in sorted(ids)))
 
 def ensure_defaults():
     if not get_setting("ACTIVE_INBOUND_ID"): set_setting("ACTIVE_INBOUND_ID", str(THREEXUI_INBOUND_ID))
