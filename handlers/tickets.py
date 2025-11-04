@@ -23,8 +23,8 @@ class AdminReply(StatesGroup):
 def kb_ticket_user():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="ط¨ط³طھظ† طھغŒع©طھ", callback_data="ticket:close")],
-            [InlineKeyboardButton(text="ط®ط§ظ†ظ‡ ًںڈ ", callback_data="home")],
+            [InlineKeyboardButton(text="بستن تیکت", callback_data="ticket:close")],
+            [InlineKeyboardButton(text="خانه 🏠", callback_data="home")],
         ]
     )
 
@@ -42,7 +42,7 @@ async def user_support(cb: CallbackQuery):
     ).fetchone()
     if trow:
         await cb.message.edit_text(
-            f"You already have an open ticket: #{trow['id']}\nPlease continue the conversation here.",
+            f"شما یک تیکت باز دارید: #{trow['id']}\nلطفاً ادامه گفتگو را اینجا انجام دهید.",
             reply_markup=kb_ticket_user(),
         )
     else:
@@ -57,7 +57,7 @@ async def user_support(cb: CallbackQuery):
             except Exception:
                 pass
         await cb.message.edit_text(
-            f"Ticket opened: #{tid}\nPlease describe your issue.",
+            f"تیکت باز شد: #{tid}\nلطفاً مشکل خود را توضیح دهید.",
             reply_markup=kb_ticket_user(),
         )
 
@@ -74,7 +74,7 @@ async def user_ticket_close(cb: CallbackQuery):
         (cb.from_user.id,),
     ).fetchone()
     if not row:
-        return await cb.answer("No open ticket.", show_alert=True)
+        return await cb.answer("هیچ تیکت بازی ندارید.", show_alert=True)
     ticket_close(row["id"])
     for aid in get_admin_ids():
         try:
@@ -86,7 +86,7 @@ async def user_ticket_close(cb: CallbackQuery):
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="ط§غŒط¬ط§ط¯ طھغŒع©طھ ط¬ط¯غŒط¯", callback_data="support")],
-                    [InlineKeyboardButton(text="ط®ط§ظ†ظ‡ ًںڈ ", callback_data="home")],
+                    [InlineKeyboardButton(text="خانه 🏠", callback_data="home")],
                 ]
             ),
         )
@@ -113,10 +113,10 @@ async def user_ticket_pipeline(m: Message):
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="ظ¾ط§ط³ط® âœچï¸ڈ", callback_data=f"adm:tkt:reply:{tid}"),
-                InlineKeyboardButton(text="ط¨ط³طھظ† ًں”’", callback_data=f"adm:tkt:close:{tid}"),
+                InlineKeyboardButton(text="پاسخ ✍️", callback_data=f"adm:tkt:reply:{tid}"),
+                InlineKeyboardButton(text="بستن 🔒", callback_data=f"adm:tkt:close:{tid}"),
             ],
-            [InlineKeyboardButton(text="ظ†ظ…ط§غŒط´ ط³ط§ط¨ظ‚ظ‡", callback_data=f"adm:tkt:view:{tid}:0")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"adm:tkt:view:{tid}:0")],
         ]
     )
     for aid in get_admin_ids():
@@ -187,7 +187,7 @@ async def admin_tickets_list(cb: CallbackQuery):
             await cb.message.delete()
         except Exception:
             pass
-        await cb.bot.send_message(cb.from_user.id, "Tickets:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+        await cb.bot.send_message(cb.from_user.id, "تیکت‌ها:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
 
 @router.callback_query(F.data.regexp(r"^adm:tkt:view:(\d+):(\d+)$"))
@@ -200,27 +200,27 @@ async def admin_ticket_view(cb: CallbackQuery):
     tid = int(m.group(1))
     page = int(m.group(2))
     rows, total = list_ticket_messages_page(tid, page, 10)
-    txt = [f"Ticket history #{tid} (page {page+1})"]
+    txt = [f"سابقه تیکت #{tid} (page {page+1})"]
     for r in rows:
-        who = "User" if r["sender_type"] == "user" else "Admin"
+        who = "کاربر" if r["sender_type"] == "user" else "ادمین"
         if r["kind"] == "text":
             txt.append(f"{who}: {htmlesc(r['content'] or '')}")
         else:
             txt.append(f"{who}: [{r['kind']}] {htmlesc(r.get('caption') or '')}")
     kb = [
         [
-            InlineKeyboardButton(text="ظ¾ط§ط³ط® âœچï¸ڈ", callback_data=f"adm:tkt:reply:{tid}"),
-            InlineKeyboardButton(text="ط¨ط³طھظ† ًں”’", callback_data=f"adm:tkt:close:{tid}"),
+            InlineKeyboardButton(text="پاسخ ✍️", callback_data=f"adm:tkt:reply:{tid}"),
+            InlineKeyboardButton(text="بستن 🔒", callback_data=f"adm:tkt:close:{tid}"),
         ]
     ]
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="ظ‚ط¨ظ„غŒ", callback_data=f"adm:tkt:view:{tid}:{page-1}"))
+        nav.append(InlineKeyboardButton(text="قبلی", callback_data=f"adm:tkt:view:{tid}:{page-1}"))
     if (page + 1) * 10 < total:
-        nav.append(InlineKeyboardButton(text="ط¨ط¹ط¯غŒ", callback_data=f"adm:tkt:view:{tid}:{page+1}"))
+        nav.append(InlineKeyboardButton(text="بعدی", callback_data=f"adm:tkt:view:{tid}:{page+1}"))
     if nav:
         kb.append(nav)
-    kb.append([InlineKeyboardButton(text="ط¨ط§ط²ع¯ط´طھ â¬…ï¸ڈ", callback_data="admin:tickets:0")])
+    kb.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin:tickets:0")])
     try:
         await cb.message.edit_text("\n".join(txt), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode=ParseMode.HTML)
     except Exception:
@@ -240,12 +240,12 @@ async def admin_ticket_close(cb: CallbackQuery):
     tid = int(re.match(r"^adm:tkt:close:(\d+)$", cb.data).group(1))
     row = cur.execute("SELECT user_id,status FROM tickets WHERE id=?", (tid,)).fetchone()
     if not row:
-        return await cb.answer("Ticket not found")
+        return await cb.answer("تیکت یافت نشد")
     if str(row["status"]) != "open":
-        return await cb.answer("Ticket already closed")
+        return await cb.answer("تیکت قبلاً بسته شده است")
     ticket_close(tid)
     try:
-        await cb.bot.send_message(row["user_id"], f"Your ticket #{tid} has been closed.")
+        await cb.bot.send_message(row["user_id"], f"تیکت شما #{tid} بسته شد.")
     except Exception:
         pass
     await admin_tickets_list(cb)
@@ -261,14 +261,14 @@ async def admin_ticket_reply(cb: CallbackQuery, state: FSMContext):
     await state.set_state(AdminReply.waiting)
     await state.update_data(tid=tid)
     prompt = (
-        f"Replying to ticket #{tid}. Send your message (text/media).\n"
-        f"Send /cancel to abort."
+        f"در حال پاسخ به تیکت #{tid}. پیام خود را ارسال کنید (متن/رسانه).\n"
+        f"برای لغو، /cancel را بفرستید."
     )
     try:
         await cb.message.edit_text(
             prompt,
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="ط¨ط§ط²ع¯ط´طھ â¬…ï¸ڈ", callback_data=f"adm:tkt:view:{tid}:0")]]
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"adm:tkt:view:{tid}:0")]]
             ),
         )
     except Exception:
@@ -280,7 +280,7 @@ async def admin_ticket_reply(cb: CallbackQuery, state: FSMContext):
             cb.from_user.id,
             prompt,
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="ط¨ط§ط²ع¯ط´طھ â¬…ï¸ڈ", callback_data=f"adm:tkt:view:{tid}:0")]]
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"adm:tkt:view:{tid}:0")]]
             ),
         )
 
@@ -289,16 +289,16 @@ async def admin_ticket_reply(cb: CallbackQuery, state: FSMContext):
 async def admin_reply_dispatch(m: Message, state: FSMContext):
     if m.text and m.text.strip() == "/cancel":
         await state.clear()
-        return await m.reply("Cancelled.")
+        return await m.reply("لغو شد.")
     data = await state.get_data()
     tid = int(data.get("tid"))
     row = cur.execute("SELECT user_id,status FROM tickets WHERE id=?", (tid,)).fetchone()
     if not row:
         await state.clear()
-        return await m.reply("Ticket not found.")
+        return await m.reply("تیکت یافت نشد.")
     if str(row["status"]) != "open":
         await state.clear()
-        return await m.reply("Ticket is closed.")
+        return await m.reply("تیکت بسته است.")
     uid = row["user_id"]
     try:
         if m.photo:
@@ -317,10 +317,11 @@ async def admin_reply_dispatch(m: Message, state: FSMContext):
             msg = await m.bot.send_message(uid, m.text or "")
             store_tmsg(tid, "admin", m.from_user.id, "text", m.text or "", None, msg.message_id)
     except Exception as e:
-        await m.reply(f"Send failed: {e}")
+        await m.reply(f"ارسال نشد: {e}")
         return
     await state.clear()
-    await m.reply("Sent.")
+    await m.reply("ارسال شد.")
+
 
 
 
