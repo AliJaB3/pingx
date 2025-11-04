@@ -1,6 +1,7 @@
 import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from config import BOT_TOKEN
 from db import migrate, ensure_defaults, ensure_default_plans
 from handlers import user as user_handlers
@@ -11,7 +12,7 @@ from scheduler import scheduler
 
 async def main():
     migrate(); ensure_defaults(); ensure_default_plans()
-    bot=Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
+    bot=Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp=Dispatcher()
 
     dp.include_router(user_handlers.router)
