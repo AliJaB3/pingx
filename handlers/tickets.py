@@ -82,10 +82,10 @@ async def user_ticket_close(cb: CallbackQuery):
         except Exception:
             pass
         await cb.message.edit_text(
-            "طھغŒع©طھ ط¨ط³طھظ‡ ط´ط¯.",
+            "تیکت بسته شد.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="ط§غŒط¬ط§ط¯ طھغŒع©طھ ط¬ط¯غŒط¯", callback_data="support")],
+                    [InlineKeyboardButton(text="ایجاد تیکت جدید", callback_data="support")],
                     [InlineKeyboardButton(text="خانه 🏠", callback_data="home")],
                 ]
             ),
@@ -167,7 +167,7 @@ async def admin_tickets_list(cb: CallbackQuery):
         kb.append(
             [
                 InlineKeyboardButton(
-                    text=f"#{t['id']} آ· {t['status']} آ· user {t['user_id']}",
+                    text=f"#{t['id']} · {t['status']} · user {t['user_id']}",
                     callback_data=f"adm:tkt:view:{t['id']}:0",
                 )
             ]

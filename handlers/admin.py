@@ -25,8 +25,8 @@ router = Router()
 @router.callback_query(F.data == "admin")
 async def admin_menu(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
-        return await cb.answer("ط¯ط³طھط±ط³غŒ ط؛غŒط±ظ…ط¬ط§ط²", show_alert=True)
-    await cb.message.edit_text("ظ¾ظ†ظ„ ط§ط¯ظ…غŒظ†:", reply_markup=kb_admin_root())
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    await cb.message.edit_text("پنل ادمین:", reply_markup=kb_admin_root())
 
 
 def search_users_page(q: str, offset: int, limit: int):
@@ -75,7 +75,7 @@ def kb_admin_users_list(rows, page: int, total: int, page_size: int, q: str | No
         kb.append(
             [
                 InlineKeyboardButton(
-                    text=f"{name} ({r['user_id']}) آ· {r['wallet']:,}",
+                    text=f"{name} ({r['user_id']}) · {r['wallet']:,}",
                     callback_data=f"admin:u:{r['user_id']}",
                 )
             ]

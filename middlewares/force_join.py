@@ -1,4 +1,4 @@
-from typing import Callable, Any, Awaitable
+﻿from typing import Callable, Any, Awaitable
 from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
 from aiogram import Bot
