@@ -4,14 +4,14 @@
 def kb_main(uid: int, is_admin: bool):
     btns = [
         [
-            InlineKeyboardButton(text="کیف‌پول 💳", callback_data="wallet"),
+            InlineKeyboardButton(text="کیف پول 💳", callback_data="wallet"),
             InlineKeyboardButton(text="خرید اشتراک 🛒", callback_data="buy"),
         ],
-        [InlineKeyboardButton(text="اشتراک‌های من 🧾", callback_data="mysubs")],
-        [InlineKeyboardButton(text="پشتیبانی 🎧", callback_data="support")],
+        [InlineKeyboardButton(text="اشتراک‌های من 🎫", callback_data="mysubs")],
+        [InlineKeyboardButton(text="پشتیبانی 👨‍💻", callback_data="support")],
     ]
     if is_admin:
-        btns.insert(0, [InlineKeyboardButton(text="پنل ادمین ⚙️", callback_data="admin")])
+        btns.insert(0, [InlineKeyboardButton(text="مدیریت 👑", callback_data="admin")])
     return InlineKeyboardMarkup(inline_keyboard=btns)
 
 
@@ -20,11 +20,11 @@ def kb_force_join(channel: str):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="عضویت در کانال 📣",
+                    text="عضویت در کانال ✅",
                     url=f"https://t.me/{channel.lstrip('@')}",
                 )
             ],
-            [InlineKeyboardButton(text="بررسی مجدد ✅", callback_data="recheck_join")],
+            [InlineKeyboardButton(text="عضو شدم 🔄", callback_data="recheck_join")],
         ]
     )
 
@@ -39,11 +39,11 @@ def kb_plans(plans, is_admin: bool):
             continue
         rows.append([
             InlineKeyboardButton(
-                text=f"{p['title']} · {p['price']:,} تومان",
+                text=f"{p['title']} • {p['price']:,} تومان",
                 callback_data=f"plan:{p['id']}",
             )
         ])
-    rows.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="home")])
+    rows.append([InlineKeyboardButton(text="بازگشت ↩️", callback_data="home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -57,17 +57,17 @@ def kb_mysubs(rows):
         ]
         for r in rows
     ]
-    kb.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="home")])
+    kb.append([InlineKeyboardButton(text="بازگشت ↩️", callback_data="home")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 def kb_sub_detail(purchase_id: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="ارسال لینک/QR 🔗", callback_data=f"subfix:{purchase_id}")],
+            [InlineKeyboardButton(text="دریافت لینک/QR 📄", callback_data=f"subfix:{purchase_id}")],
             [InlineKeyboardButton(text="چرخاندن لینک ♻️", callback_data=f"subrevoke:{purchase_id}")],
-            [InlineKeyboardButton(text="به‌روزرسانی مصرف 🔄", callback_data=f"substat:{purchase_id}")],
-            [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="mysubs")],
+            [InlineKeyboardButton(text="وضعیت مصرف 📊", callback_data=f"substat:{purchase_id}")],
+            [InlineKeyboardButton(text="بازگشت ↩️", callback_data="mysubs")],
         ]
     )
 
@@ -79,9 +79,9 @@ def kb_admin_root():
             [InlineKeyboardButton(text="کاربران 👥", callback_data="admin:users:0:")],
             [InlineKeyboardButton(text="تیکت‌ها 🎟️", callback_data="admin:tickets:0")],
             [InlineKeyboardButton(text="پلن‌ها 📦", callback_data="admin:plans")],
-            [InlineKeyboardButton(text="قالب پیام‌ها 📝", callback_data="admin:templates")],
+            [InlineKeyboardButton(text="متن‌های آماده 📝", callback_data="admin:templates")],
             [InlineKeyboardButton(text="تنظیمات ⚙️", callback_data="admin:settings")],
-            [InlineKeyboardButton(text="بررسی پنل 3x-ui 🧪", callback_data="admin:paneltest")],
+            [InlineKeyboardButton(text="تست پنل 3x-ui 🧪", callback_data="admin:paneltest")],
             [InlineKeyboardButton(text="خانه 🏠", callback_data="home")],
         ]
     )

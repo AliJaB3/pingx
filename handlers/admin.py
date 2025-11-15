@@ -17,9 +17,35 @@ from db import (
 )
 from utils import htmlesc, human_bytes
 from xui import three_session
-from config import THREEXUI_INBOUND_ID
+from config import THREEXUI_INBOUND_ID, PAGE_SIZE_USERS
 
 router = Router()
+
+
+SETTINGS_MENU = [
+    ("ACTIVE_INBOUND_ID", "شناسه اینباند فعال"),
+    ("REQUIRED_CHANNEL", "کانال اجباری"),
+    ("CARD_NUMBER", "شماره کارت"),
+    ("SUB_HOST", "Sub Host"),
+    ("SUB_PORT", "Sub Port"),
+    ("SUB_SCHEME", "Sub Scheme"),
+    ("SUB_PATH", "Sub Path"),
+    ("MAX_RECEIPT_PHOTOS", "حداکثر عکس رسید"),
+    ("MAX_RECEIPT_MB", "حداکثر حجم رسید (MB)"),
+]
+
+SETTINGS_KEYS_PATTERN = "|".join(key for key, _ in SETTINGS_MENU)
+
+
+SETTINGS_META = {
+    "ACTIVE_INBOUND_ID": {"type": "int", "min": 1, "error": "شناسه اینباند باید عدد باشد."},
+    "SUB_PORT": {"type": "int", "min": 1, "error": "پورت باید عدد مثبت باشد."},
+    "MAX_RECEIPT_PHOTOS": {"type": "int", "min": 1, "error": "حداقل باید ۱ عکس مجاز باشد."},
+    "MAX_RECEIPT_MB": {"type": "int", "min": 1, "error": "حجم باید بیشتر از صفر باشد."},
+    "SUB_PATH": {"type": "path"},
+    "SUB_SCHEME": {"type": "scheme"},
+    "REQUIRED_CHANNEL": {"type": "channel"},
+}
 
 
 @router.callback_query(F.data == "admin")
@@ -410,30 +436,29 @@ async def admin_settings_stub_redirect(cb: CallbackQuery):
 async def admin_settings(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    active = get_setting("ACTIVE_INBOUND_ID", "-")
-    req_ch = get_setting("REQUIRED_CHANNEL", "-")
-    card = get_setting("CARD_NUMBER", "-")
-    txt = (
-        f"Settings:\nACTIVE_INBOUND_ID: {active}\nREQUIRED_CHANNEL: {req_ch}\nCARD_NUMBER: {card}"
-    )
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Edit ACTIVE_INBOUND_ID", callback_data="admin2:s:edit:ACTIVE_INBOUND_ID")],
-            [InlineKeyboardButton(text="Edit REQUIRED_CHANNEL", callback_data="admin2:s:edit:REQUIRED_CHANNEL")],
-            [InlineKeyboardButton(text="Edit CARD_NUMBER", callback_data="admin2:s:edit:CARD_NUMBER")],
-            [InlineKeyboardButton(text="All Settings", callback_data="admin2:allsettings:0")],
-            [InlineKeyboardButton(text="All Templates", callback_data="admin2:alltpl:0")],
+    lines = []
+    buttons = []
+    for key, label in SETTINGS_MENU:
+        val = get_setting(key, "-")
+        safe_val = htmlesc(str(val if val not in (None, "") else "-"))
+        lines.append(f"{label}: <code>{safe_val}</code>")
+        buttons.append([InlineKeyboardButton(text=f"ویرایش {label}", callback_data=f"admin2:s:edit:{key}")])
+    buttons.extend(
+        [
+            [InlineKeyboardButton(text="تمام تنظیمات", callback_data="admin2:allsettings:0")],
+            [InlineKeyboardButton(text="تمام قالب‌ها", callback_data="admin2:alltpl:0")],
             [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")],
         ]
     )
-    await cb.message.edit_text(txt, reply_markup=kb)
+    txt = "تنظیمات اصلی:\n" + "\n".join(lines)
+    await cb.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode=ParseMode.HTML)
 
 
-@router.callback_query(F.data.regexp(r"^admin2:s:edit:(ACTIVE_INBOUND_ID|REQUIRED_CHANNEL|CARD_NUMBER)$"))
+@router.callback_query(F.data.regexp(rf"^admin2:s:edit:({SETTINGS_KEYS_PATTERN})$"))
 async def admin_settings_edit(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    key = re.match(r"^admin2:s:edit:(ACTIVE_INBOUND_ID|REQUIRED_CHANNEL|CARD_NUMBER)$", cb.data).group(1)
+    key = re.match(rf"^admin2:s:edit:({SETTINGS_KEYS_PATTERN})$", cb.data).group(1)
     await state.set_state(SettingEdit.waiting)
     await state.update_data(key=key)
     await cb.message.edit_text(
@@ -449,12 +474,30 @@ async def admin_settings_edit_recv(m: Message, state: FSMContext):
     data = await state.get_data()
     key = data.get("key")
     val = (m.text or "").strip()
-    if key == "ACTIVE_INBOUND_ID":
-        if not val.isdigit():
-            return await m.reply("Must be a number.")
-    if key == "REQUIRED_CHANNEL":
-        if val and not val.startswith("@"):
-            val = "@" + val
+    meta = SETTINGS_META.get(key)
+    if meta:
+        kind = meta.get("type")
+        if kind == "int":
+            try:
+                num = int(val)
+            except Exception:
+                return await m.reply(meta.get("error", "مقدار باید عددی باشد."))
+            if num < meta.get("min", 0):
+                return await m.reply(meta.get("error", "مقدار باید بزرگتر از صفر باشد."))
+            val = str(num)
+        elif kind == "channel":
+            val = val or ""
+            val = val.strip()
+            if val and not val.startswith("@"):
+                val = "@" + val
+        elif kind == "path":
+            val = (val or "/").strip() or "/"
+            if not val.startswith("/"):
+                val = "/" + val
+            if not val.endswith("/"):
+                val += "/"
+        elif kind == "scheme":
+            val = (val or "https").strip().lower() or "https"
     set_setting(key, val)
     await state.clear()
     await m.reply("Setting updated.")

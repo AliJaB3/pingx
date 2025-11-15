@@ -144,6 +144,12 @@ def ensure_defaults():
     if not get_setting("WELCOME_TEMPLATE"): set_setting("WELCOME_TEMPLATE", "<b>به <i>PingX</i> خوش آمدید</b>\\n\\nاز دکمه‌های زیر استفاده کنید.")
     if not get_setting("POST_PURCHASE_TEMPLATE"): set_setting("POST_PURCHASE_TEMPLATE", "اشتراک شما آماده شد.")
     if not get_setting("CARD_NUMBER"): set_setting("CARD_NUMBER", CARD_NUMBER)
+    if get_setting("SUB_HOST") is None: set_setting("SUB_HOST", SUB_HOST or "")
+    if get_setting("SUB_SCHEME") is None: set_setting("SUB_SCHEME", SUB_SCHEME or "https")
+    if get_setting("SUB_PATH") is None: set_setting("SUB_PATH", SUB_PATH or "/sub/")
+    if get_setting("SUB_PORT") is None: set_setting("SUB_PORT", str(SUB_PORT))
+    if get_setting("MAX_RECEIPT_PHOTOS") is None: set_setting("MAX_RECEIPT_PHOTOS", str(MAX_RECEIPT_PHOTOS))
+    if get_setting("MAX_RECEIPT_MB") is None: set_setting("MAX_RECEIPT_MB", str(MAX_RECEIPT_MB))
     if not get_setting("PURCHASE_SUCCESS_TEMPLATE"): set_setting("PURCHASE_SUCCESS_TEMPLATE", "✅ خرید با موفقیت انجام شد. لینک اشتراک برای شما ارسال شد.")
     if not get_setting("PURCHASE_FAILED_TEMPLATE"): set_setting("PURCHASE_FAILED_TEMPLATE", "❌ خرید ناموفق بود. لطفاً بعداً تلاش کنید یا با پشتیبانی در ارتباط باشید.")
     if not get_setting("PAYMENT_RECEIPT_TEMPLATE"): set_setting("PAYMENT_RECEIPT_TEMPLATE", "📩 درخواست شارژ شما ثبت شد و پس از بررسی ادمین اطلاع‌رسانی می‌شود.")
