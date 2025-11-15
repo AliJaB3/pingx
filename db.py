@@ -1,6 +1,18 @@
 ﻿import sqlite3, json
 from datetime import datetime, timezone
-from config import DB_PATH, CARD_NUMBER, REQUIRED_CHANNEL, THREEXUI_INBOUND_ID, ADMIN_IDS as CONF_ADMIN_IDS
+from config import (
+    DB_PATH,
+    CARD_NUMBER,
+    REQUIRED_CHANNEL,
+    THREEXUI_INBOUND_ID,
+    ADMIN_IDS as CONF_ADMIN_IDS,
+    SUB_HOST,
+    SUB_SCHEME,
+    SUB_PATH,
+    SUB_PORT,
+    MAX_RECEIPT_PHOTOS,
+    MAX_RECEIPT_MB,
+)
 from utils import now_iso
 
 TZ = timezone.utc
