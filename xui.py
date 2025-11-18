@@ -219,6 +219,29 @@ class ThreeXUISession:
         except Exception as e:
             last_err = e
 
+        # اگر خطای تکراری بودن ایمیل بود ولی کلاینت موجود است، همان را برگردان
+        try:
+            if isinstance(last_resp, dict) and "UNIQUE constraint failed: client_traffics.email" in str(last_resp.get("msg", "")):
+                existing = await self._verify_client_added(inbound_id, email=email, client_id=None)
+                if existing:
+                    need = False
+                    if not existing.get("subId"):
+                        existing["subId"] = sub_id
+                        need = True
+                    if int(existing.get("expiryTime") or 0) == 0:
+                        existing["expiryTime"] = expiry
+                        need = True
+                    if total > 0 and int(existing.get("total") or 0) == 0:
+                        existing["total"] = total
+                        need = True
+                    if need:
+                        await self.update_client(inbound_id, existing["id"], existing)
+                        existing = await self._verify_client_added(inbound_id, email=email, client_id=existing["id"])
+                    if existing:
+                        return {"client": existing, "resp": last_resp, "warn": "email existed, reused client"}
+        except Exception as e:
+            last_err = e
+
         raise ThreeXUIError(f"addClient failed on all endpoints: last_err={last_err}, last_resp={last_resp}")
 
     async def update_client(self, inbound_id: int, client_id: str, client_payload: dict):
