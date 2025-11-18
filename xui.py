@@ -124,6 +124,14 @@ class ThreeXUISession:
                 return c
         return None
 
+    async def _find_client_by_email(self, inbound_id: int, email: str):
+        c = await self._verify_client_added(inbound_id, email=email, client_id=None)
+        if c:
+            return c
+        # Try traffic endpoint that may return client info
+        stat = await self.get_client_stats(inbound_id, client_id=email, email=email)
+        return stat
+
     async def add_client(self, inbound_id: int, email: str, expire_days: int, data_gb: int, remark: str):
         total = (int(data_gb) * 1024**3) if int(data_gb) > 0 else 0
         expiry = int((datetime.now(TZ) + timedelta(days=int(expire_days))).timestamp() * 1000)
@@ -222,7 +230,7 @@ class ThreeXUISession:
         # اگر خطای تکراری بودن ایمیل بود ولی کلاینت موجود است، همان را برگردان
         try:
             if isinstance(last_resp, dict) and "UNIQUE constraint failed: client_traffics.email" in str(last_resp.get("msg", "")):
-                existing = await self._verify_client_added(inbound_id, email=email, client_id=None)
+                existing = await self._find_client_by_email(inbound_id, email=email)
                 if existing:
                     need = False
                     if not existing.get("subId"):
@@ -234,6 +242,8 @@ class ThreeXUISession:
                     if total > 0 and int(existing.get("total") or 0) == 0:
                         existing["total"] = total
                         need = True
+                    if not existing.get("email"):
+                        existing["email"] = email
                     if need:
                         await self.update_client(inbound_id, existing["id"], existing)
                         existing = await self._verify_client_added(inbound_id, email=email, client_id=existing["id"])
@@ -283,6 +293,9 @@ class ThreeXUISession:
                 for c in s.get("clients") or []:
                     if str(c.get("id")) == str(client_id) or (email and c.get("email") == email):
                         return {
+                            "id": c.get("id"),
+                            "email": c.get("email"),
+                            "subId": c.get("subId"),
                             "up": int(c.get("up", 0)),
                             "down": int(c.get("down", 0)),
                             "total": int(c.get("total", 0)),
@@ -300,6 +313,9 @@ class ThreeXUISession:
                     obj = d["obj"]
                     if isinstance(obj, dict):
                         return {
+                            "id": obj.get("id"),
+                            "email": obj.get("email"),
+                            "subId": obj.get("subId"),
                             "up": int(obj.get("up", 0)),
                             "down": int(obj.get("down", 0)),
                             "total": int(obj.get("total", 0)),
@@ -309,6 +325,9 @@ class ThreeXUISession:
                         for it in obj:
                             if str(it.get("id")) == str(client_id) or (email and it.get("email") == email):
                                 return {
+                                    "id": it.get("id"),
+                                    "email": it.get("email"),
+                                    "subId": it.get("subId"),
                                     "up": int(it.get("up", 0)),
                                     "down": int(it.get("down", 0)),
                                     "total": int(it.get("total", 0)),
