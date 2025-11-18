@@ -145,19 +145,16 @@ async def admin_users(cb: CallbackQuery):
     )
 
 
-@router.callback_query(F.data.regexp(r"^admin:u:(\d+)$"))
-async def admin_user_detail(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
-        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    uid = int(re.match(r"^admin:u:(\d+)$", cb.data).group(1))
+async def _render_admin_user_detail(cb: CallbackQuery, uid: int):
     u = cur.execute("SELECT * FROM users WHERE user_id=?", (uid,)).fetchone()
     if not u:
-        return await cb.answer("User not found")
+        await cb.answer("کاربر یافت نشد", show_alert=True)
+        return False
     text = (
         f"<b>کاربر {uid}</b>\n"
-        f"نام: {(u['first_name'] or '')} {(u['last_name'] or '')}\n"
+        f"نام: {(u['first_name'] or '').strip()} {(u['last_name'] or '').strip()}\n"
         f"یوزرنیم: @{u['username'] or '-'}\n"
-        f"موجودی: {u['wallet']:,}\n"
+        f"موجودی فعلی: {u['wallet']:,}\n"
         f"تاریخ عضویت: {u['created_at'][:19].replace('T',' ')}"
     )
     kb = InlineKeyboardMarkup(
@@ -169,6 +166,88 @@ async def admin_user_detail(cb: CallbackQuery):
                 InlineKeyboardButton(text="+50k", callback_data=f"admin:u:wallet:{uid}:+50000"),
                 InlineKeyboardButton(text="-50k", callback_data=f"admin:u:wallet:{uid}:-50000"),
             ],
+            [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin:users:0:")],
+        ]
+    )
+    await cb.message.edit_text(text, reply_markup=kb, parse_mode=ParseMode.HTML)
+    return True
+
+
+@router.callback_query(F.data.regexp(r"^admin:u:(\d+)$"))
+async def admin_user_detail(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    uid = int(re.match(r"^admin:u:(\d+)$", cb.data).group(1))
+    await _render_admin_user_detail(cb, uid)
+
+
+@router.callback_query(F.data.regexp(r"^admin:u:wallet:(\d+):([+-]?\d+)$"))
+async def admin_user_wallet_adjust(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    m = re.match(r"^admin:u:wallet:(\d+):([+-]?\d+)$", cb.data)
+    uid = int(m.group(1))
+    delta = int(m.group(2))
+    u = cur.execute("SELECT * FROM users WHERE user_id=?", (uid,)).fetchone()
+    if not u:
+        return await cb.answer("کاربر یافت نشد", show_alert=True)
+    db_add_wallet(uid, delta)
+    log_evt(cb.from_user.id, "wallet_adjust", {"target": uid, "delta": delta})
+    await cb.answer(f"تغییر {delta:+,} ثبت شد.")
+    await _render_admin_user_detail(cb, uid)
+
+
+@router.callback_query(F.data.regexp(r"^admin:u:buys:(\d+)$"))
+async def admin_user_buys(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    uid = int(re.match(r"^admin:u:buys:(\d+)$", cb.data).group(1))
+    rows = user_purchases(uid)
+    if not rows:
+        text = "خریدی برای این کاربر ثبت نشده است."
+    else:
+        lines = []
+        for r in rows[:10]:
+            ts = r.get("created_at") or ""
+            ts = ts[:19].replace("T", " ") if ts else "-"
+            lines.append(
+                f"#{r['id']} | پلن {htmlesc(r['plan_id'])} | مبلغ {r['price']:,} | تاریخ {ts}"
+            )
+        text = "<b>خریدهای اخیر:</b>\n" + "\n".join(lines)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="بازگشت به کاربر", callback_data=f"admin:u:{uid}")],
+            [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin:users:0:")],
+        ]
+    )
+    await cb.message.edit_text(text, reply_markup=kb, parse_mode=ParseMode.HTML)
+
+
+@router.callback_query(F.data.regexp(r"^admin:u:usage:(\d+)$"))
+async def admin_user_usage(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    uid = int(re.match(r"^admin:u:usage:(\d+)$", cb.data).group(1))
+    rows = user_purchases(uid)
+    if not rows:
+        text = "مصرفی برای این کاربر یافت نشد."
+    else:
+        lines = []
+        for r in rows[:5]:
+            cached = cache_get_usage(r["id"])
+            if cached:
+                used = int(cached.get("up") or 0) + int(cached.get("down") or 0)
+                total = int(cached.get("total") or 0)
+                pct = 0 if total <= 0 else min(99, int((used / total) * 100))
+                total_hr = "نامحدود" if total <= 0 else human_bytes(total)
+                usage_txt = f"{human_bytes(used)} / {total_hr} ({pct}٪)"
+            else:
+                usage_txt = "داده‌ای ثبت نشده"
+            lines.append(f"#{r['id']} | پلن {htmlesc(r['plan_id'])} | {usage_txt}")
+        text = "<b>وضعیت مصرف:</b>\n" + "\n".join(lines)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="بازگشت به کاربر", callback_data=f"admin:u:{uid}")],
             [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin:users:0:")],
         ]
     )
@@ -500,7 +579,12 @@ async def admin_settings_edit_recv(m: Message, state: FSMContext):
             val = (val or "https").strip().lower() or "https"
     set_setting(key, val)
     await state.clear()
-    await m.reply("Setting updated.")
+    await m.reply(
+        "تنظیم به‌روزرسانی شد.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="بازگشت به تنظیمات", callback_data="admin2:settings")]]
+        ),
+    )
 
 
 # ---- Generic Settings Manager ----
