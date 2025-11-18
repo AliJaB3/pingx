@@ -35,9 +35,9 @@ async def main():
     dp = Dispatcher()
     dp.update.middleware(ForceJoinMiddleware())
 
-    @dp.errors.register(Exception)
-    async def on_error(event, err):
-        logger.exception("Unhandled error in update", exc_info=err)
+    @dp.errors()
+    async def on_error(event, exception):
+        logger.exception("Unhandled error in update", exc_info=exception)
         return True
 
     dp.include_router(user_handlers.router)
