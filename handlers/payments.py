@@ -67,19 +67,38 @@ async def topup_ask_amount(cb: CallbackQuery, state: FSMContext):
     card_number = _runtime_card_number()
     max_photos = _runtime_max_photos()
     max_mb = _runtime_max_mb()
+    amounts = [150_000, 300_000, 500_000, 1_000_000]
+    kb_amounts = [
+        [InlineKeyboardButton(text=f"{amt:,} تومان", callback_data=f"topamt:{amt}")]
+        for amt in amounts
+    ]
+    kb_amounts.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="wallet")])
     msg = (
         "<b>🔼 افزایش موجودی</b>\n\n"
-        "۱) مبلغ موردنظر را به کارت زیر واریز کنید.\n"
-        "۲) رسید یا توضیحات را ارسال کنید و در پایان عبارت <code>done</code> را بفرستید.\n\n"
+        "یک مبلغ انتخاب کن، سپس رسید یا توضیحات را ارسال و در پایان <code>done</code> بزن.\n\n"
         f"💳 <b>کارت مقصد:</b> <code>{card_number}</code>\n"
-        "💵 حداقل مبلغ پیشنهادی: 150,000 تومان\n"
-        f"🖼 حداکثر تعداد عکس: {max_photos}\n"
-        f"📏 حداکثر حجم هر عکس: {max_mb}MB"
+        f"🖼 حداکثر تعداد عکس: {max_photos} | 📏 حداکثر حجم هر عکس: {max_mb}MB"
     )
     await cb.message.edit_text(
         msg,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_amounts),
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@router.callback_query(F.data.startswith("topamt:"))
+async def topup_select_amount(cb: CallbackQuery, state: FSMContext):
+    try:
+        amount = int(cb.data.split(":")[1])
+    except Exception:
+        return await cb.answer("مبلغ نامعتبر", show_alert=True)
+    await state.update_data(amount=amount, photos=[], notes=[])
+    await state.set_state(Topup.note)
+    await cb.message.edit_text(
+        f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\n"
+        "رسید یا توضیحات را ارسال کن و در پایان <code>done</code> بزن.",
         reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="wallet")]]
+            inline_keyboard=[[InlineKeyboardButton(text="⬅️ انصراف", callback_data="wallet")]]
         ),
         parse_mode=ParseMode.HTML,
     )
