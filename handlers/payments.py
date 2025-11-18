@@ -1,8 +1,9 @@
-﻿from aiogram import Router, F
+from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ParseMode
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter
 
 from config import CARD_NUMBER, MAX_RECEIPT_PHOTOS, MAX_RECEIPT_MB, PAGE_SIZE_PAYMENTS
 from db import (
@@ -59,6 +60,7 @@ async def wallet(cb: CallbackQuery):
 
 @router.callback_query(F.data == "topup")
 async def topup_ask_amount(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
     await state.set_state(Topup.amount)
     card_number = _runtime_card_number()
     max_photos = _runtime_max_photos()
@@ -81,19 +83,19 @@ async def topup_ask_amount(cb: CallbackQuery, state: FSMContext):
     )
 
 
-@router.message(Topup.amount)
+@router.message(StateFilter(Topup.amount))
 async def topup_got_amount(m: Message, state: FSMContext):
     try:
         amount = int(str(m.text).replace(",", "").strip())
     except Exception:
         await m.reply("مبلغ وارد شده صحیح نیست. لطفاً فقط عدد ارسال کنید.")
         return
-    await state.update_data(amount=amount, photos=[])
+    await state.update_data(amount=amount, photos=[], notes=[])
     await state.set_state(Topup.note)
     await m.reply("مبلغ ثبت شد. حالا رسید/توضیح را بفرستید و در پایان عبارت done را ارسال کنید.")
 
 
-@router.message(F.photo)
+@router.message(StateFilter(Topup.note), F.photo)
 async def collect_photo(m: Message, state: FSMContext):
     s = await state.get_state()
     if not s or "Topup" not in s:
@@ -117,30 +119,46 @@ async def collect_photo(m: Message, state: FSMContext):
     await m.reply(f"عکس ثبت شد ✅ ({len(photos)}/{max_photos}).")
 
 
-@router.message(Topup.note)
+@router.message(StateFilter(Topup.note))
 async def topup_collect(m: Message, state: FSMContext):
     data = await state.get_data()
     amount = data.get("amount")
     photos = data.get("photos", [])
+    notes = data.get("notes", [])
     if m.text and m.text.strip().lower() == "done":
-        pid = db_new_payment(m.from_user.id, amount, data.get("note", ""), photos)
+        note_txt = "\n".join(n for n in notes if n).strip()
+        pid = db_new_payment(m.from_user.id, amount, note_txt, photos)
         await state.clear()
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="نمایش", callback_data=f"payview:{pid}")]])
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="نمایش درخواست", callback_data=f"payview:{pid}")]]
+        )
         for aid in get_admin_ids():
             try:
-                if photos:
-                    await m.bot.send_message(aid, f"درخواست شارژ #{pid}\nاز <a href=\"tg://user?id={m.from_user.id}\">{htmlesc(m.from_user.full_name or m.from_user.username or str(m.from_user.id))}</a>\nمبلغ: {amount:,}", parse_mode=ParseMode.HTML)
-                    for ph in photos:
-                        await m.bot.send_photo(aid, ph, caption=f"شارژ #{pid}")
-                    await m.bot.send_message(aid, "اقدام:", reply_markup=kb)
-                else:
-                    await m.bot.send_message(aid, f"درخواست شارژ #{pid}\nاز <a href=\"tg://user?id={m.from_user.id}\">{htmlesc(m.from_user.full_name or m.from_user.username or str(m.from_user.id))}</a>\nمبلغ: {amount:,}", reply_markup=kb, parse_mode=ParseMode.HTML)
+                base_msg = (
+                    f"درخواست شارژ #{pid}\n"
+                    f"از <a href=\"tg://user?id={m.from_user.id}\">{htmlesc(m.from_user.full_name or m.from_user.username or str(m.from_user.id))}</a>\n"
+                    f"مبلغ: {amount:,}"
+                )
+                if note_txt:
+                    base_msg += f"\nتوضیح: {htmlesc(note_txt)}"
+                await m.bot.send_message(aid, base_msg, parse_mode=ParseMode.HTML)
+                for ph in photos:
+                    await m.bot.send_photo(aid, ph, caption=f"رسید #{pid}")
+                await m.bot.send_message(aid, "اقدام:", reply_markup=kb)
             except Exception:
-                pass
+                continue
         await m.reply("درخواست شما ثبت شد و پس از تایید ادمین، کیف پول شارژ می‌شود.")
+        await m.answer(
+            _wallet_text(db_get_wallet(m.from_user.id)),
+            reply_markup=_topup_main_keyboard(),
+            parse_mode=ParseMode.HTML,
+        )
     else:
-        await state.update_data(note=m.text or "")
-        await m.reply("توضیح ثبت شد. بعد از اتمام ارسال، عبارت done را تایپ کنید.")
+        note = m.html_text or m.text or ""
+        if note:
+            notes.append(note)
+            await state.update_data(notes=notes)
+            await m.reply("توضیح ثبت شد. در پایان عبارت done را ارسال کنید.")
 
 
 @router.callback_query(F.data.regexp(r"^admin:pending:(\d+)$"))
