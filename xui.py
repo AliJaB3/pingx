@@ -167,9 +167,11 @@ class ThreeXUISession:
             ),
         ]
         last_err = None
+        last_resp = None
         for method, path, json_body, data_body, headers in attempts:
             try:
-                await self.request(method, path, json_data=json_body, data=data_body, headers=headers)
+                resp = await self.request(method, path, json_data=json_body, data=data_body, headers=headers)
+                last_resp = resp
                 v = await self._verify_client_added(inbound_id, email=email, client_id=new_id)
                 if v:
                     payload.update({k: v for k, v in v.items()})
@@ -204,21 +206,22 @@ class ThreeXUISession:
             if ib:
                 s = ib.get("settings")
                 s = json.loads(s) if isinstance(s, str) else (s or {})
-                clients = s.get("clients") or []
+                clients = list(s.get("clients") or [])
                 clients.append(payload)
                 s["clients"] = clients
-                await self.request(
+                resp = await self.request(
                     "POST",
                     f"/panel/api/inbounds/update/{int(inbound_id)}",
                     json_data={"id": int(inbound_id), "settings": json.dumps(s, ensure_ascii=False)},
                 )
+                last_resp = resp
                 v = await self._verify_client_added(inbound_id, email=email, client_id=new_id)
                 if v:
                     return {"client": v}
         except Exception as e:
             last_err = e
 
-        raise ThreeXUIError(f"addClient failed on all endpoints: {last_err}")
+        raise ThreeXUIError(f"addClient failed on all endpoints: last_err={last_err}, last_resp={last_resp}")
 
     async def update_client(self, inbound_id: int, client_id: str, client_payload: dict):
         paths = [
