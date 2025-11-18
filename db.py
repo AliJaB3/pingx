@@ -16,7 +16,8 @@ from config import (
 from utils import now_iso
 
 TZ = timezone.utc
-conn = sqlite3.connect(DB_PATH, isolation_level=None)
+conn = sqlite3.connect(DB_PATH, isolation_level=None, timeout=5, check_same_thread=False)
+conn.execute("PRAGMA busy_timeout=5000;")
 conn.row_factory = sqlite3.Row
 cur = conn.cursor()
 cur.execute("PRAGMA journal_mode=WAL;")

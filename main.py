@@ -25,17 +25,17 @@ def setup_logging():
     fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
     handlers = [
         logging.StreamHandler(),
-        RotatingFileHandler(log_file, maxBytes=2_000_000, backupCount=3, encoding="utf-8"),
+        RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=5, encoding="utf-8"),
     ]
-    logging.basicConfig(level=logging.DEBUG, format=fmt, handlers=handlers)
+    logging.basicConfig(level=logging.INFO, format=fmt, handlers=handlers)
 
-    # Increase verbosity for key libraries
-    logging.getLogger("aiogram").setLevel(logging.DEBUG)
-    logging.getLogger("aiogram.event").setLevel(logging.DEBUG)
-    logging.getLogger("httpx").setLevel(logging.DEBUG)
+    # Set INFO for libraries; switch to DEBUG only هنگام دیباگ
+    logging.getLogger("aiogram").setLevel(logging.INFO)
+    logging.getLogger("aiogram.event").setLevel(logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.INFO)
 
     events_logger = logging.getLogger("events")
-    events_logger.setLevel(logging.DEBUG)
+    events_logger.setLevel(logging.INFO)
     if not events_logger.handlers:
         events_logger.addHandler(RotatingFileHandler(events_file, maxBytes=2_000_000, backupCount=3, encoding="utf-8"))
         events_logger.propagate = False
