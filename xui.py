@@ -136,30 +136,30 @@ class ThreeXUISession:
             (
                 "POST",
                 "/panel/api/inbounds/addClient",
+                {"id": int(inbound_id), "settings": json.dumps({"clients": [payload]}, ensure_ascii=False)},
+                None,
+                None,
+            ),
+            (
+                "POST",
+                "/panel/api/inbounds/addClient",
                 {"id": int(inbound_id), "client": json.dumps(payload, ensure_ascii=False)},
                 None,
                 None,
             ),
             (
                 "POST",
-                "/panel/inbounds/addClient",
-                {"id": int(inbound_id), "client": json.dumps(payload, ensure_ascii=False)},
+                f"/panel/api/inbounds/{int(inbound_id)}/addClient",
+                {"client": payload},
                 None,
                 None,
             ),
             (
                 "POST",
-                "/xui/inbound/addClient",
+                f"/panel/api/inbounds/{int(inbound_id)}/addClient",
+                {"settings": json.dumps({"clients": [payload]}, ensure_ascii=False)},
                 None,
-                {"id": str(inbound_id), "settings": json.dumps({"clients": [payload]}, ensure_ascii=False)},
-                {"Content-Type": "application/x-www-form-urlencoded"},
-            ),
-            (
-                "POST",
-                "/panel/inbound/addClient",
                 None,
-                {"id": str(inbound_id), "settings": json.dumps({"clients": [payload]}, ensure_ascii=False)},
-                {"Content-Type": "application/x-www-form-urlencoded"},
             ),
         ]
         last_err = None
@@ -196,7 +196,10 @@ class ThreeXUISession:
         raise ThreeXUIError(f"addClient failed on all endpoints: {last_err}")
 
     async def update_client(self, inbound_id: int, client_id: str, client_payload: dict):
-        paths = [f"/panel/api/inbounds/updateClient/{client_id}", f"/panel/inbounds/updateClient/{client_id}"]
+        paths = [
+            f"/panel/api/inbounds/updateClient/{client_id}",
+            f"/panel/api/inbounds/{int(inbound_id)}/updateClient/{client_id}",
+        ]
         body = {"id": int(inbound_id), "client": json.dumps(client_payload, ensure_ascii=False)}
         last = None
         for p in paths:
@@ -240,7 +243,7 @@ class ThreeXUISession:
             pass
         for p in (
             f"/panel/api/inbounds/getClientTraffics/{email or client_id}",
-            "/panel/api/inbounds/listClientTraffics",
+            f"/panel/api/inbounds/getClientTrafficsById/{client_id}",
         ):
             try:
                 d = await self.request("GET", p, params={"inboundId": inbound_id})
