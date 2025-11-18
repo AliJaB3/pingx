@@ -175,7 +175,10 @@ class ThreeXUISession:
                 v = await self._verify_client_added(inbound_id, email=email, client_id=new_id)
                 if v:
                     payload.update({k: v for k, v in v.items()})
-                    return {"client": payload}
+                    return {"client": payload, "resp": resp}
+                # Some panels return success flag without immediately reflecting settings
+                if isinstance(resp, dict) and resp.get("success") is True:
+                    return {"client": payload, "resp": resp, "warn": "not verified, success flag only"}
             except Exception as e:
                 last_err = e
                 continue
@@ -194,9 +197,9 @@ class ThreeXUISession:
                     need = True
                 if need:
                     await self.update_client(inbound_id, v["id"], v)
-                v = await self._verify_client_added(inbound_id, email=email, client_id=v["id"])
-                if v:
-                    return {"client": v}
+                v2 = await self._verify_client_added(inbound_id, email=email, client_id=v["id"])
+                if v2:
+                    return {"client": v2}
         except Exception as e:
             last_err = e
 
@@ -217,7 +220,9 @@ class ThreeXUISession:
                 last_resp = resp
                 v = await self._verify_client_added(inbound_id, email=email, client_id=new_id)
                 if v:
-                    return {"client": v}
+                    return {"client": v, "resp": resp}
+                if isinstance(resp, dict) and resp.get("success") is True:
+                    return {"client": payload, "resp": resp, "warn": "not verified after update"}
         except Exception as e:
             last_err = e
 
