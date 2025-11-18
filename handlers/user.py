@@ -259,16 +259,23 @@ async def sub_fix_link(cb: CallbackQuery):
     client_id = r["three_xui_client_id"]
     if not three_session:
         return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
-    new_sub = await three_session.rotate_subid(inbound_id, client_id)
-    link = build_subscribe_url(new_sub)
-    cur.execute("UPDATE purchases SET sub_id=?, sub_link=? WHERE id=?", (new_sub, link, pid))
-    await cb.bot.send_photo(
-        cb.from_user.id,
-        BufferedInputFile(qr_bytes(link).getvalue(), filename="pingx.png"),
-        caption="🔗 QR و لینک جدید اشتراک:",
-    )
-    await cb.bot.send_message(cb.from_user.id, f"<a href=\"{htmlesc(link)}\">نمایش لینک</a>\n<code>{link}</code>", parse_mode=ParseMode.HTML)
-    await cb.answer("لینک جدید صادر شد.")
+    try:
+        new_sub = await three_session.rotate_subid(inbound_id, client_id)
+        link = build_subscribe_url(new_sub)
+        cur.execute("UPDATE purchases SET sub_id=?, sub_link=? WHERE id=?", (new_sub, link, pid))
+        await cb.bot.send_photo(
+            cb.from_user.id,
+            BufferedInputFile(qr_bytes(link).getvalue(), filename="pingx.png"),
+            caption="🔗 QR و لینک جدید اشتراک:",
+        )
+        await cb.bot.send_message(cb.from_user.id, f"<a href=\"{htmlesc(link)}\">نمایش لینک</a>\n<code>{link}</code>", parse_mode=ParseMode.HTML)
+        await cb.answer("لینک جدید صادر شد.")
+    except Exception as e:
+        await cb.answer("خطا در صدور لینک جدید", show_alert=True)
+        try:
+            logger.exception("rotate_subid failed pid=%s uid=%s", pid, cb.from_user.id)
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data.startswith("subrevoke:"))

@@ -5,6 +5,7 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.types import ErrorEvent
 from config import BOT_TOKEN
 from db import migrate, ensure_defaults, ensure_default_plans
 from handlers import user as user_handlers
@@ -51,8 +52,8 @@ async def main():
     dp.update.middleware(ForceJoinMiddleware())
 
     @dp.errors()
-    async def on_error(event, exception):
-        logger.exception("Unhandled error in update", exc_info=exception)
+    async def on_error(event: ErrorEvent):
+        logger.exception("Unhandled error in update", exc_info=event.exception)
         return True
 
     dp.include_router(user_handlers.router)
