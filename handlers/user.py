@@ -73,7 +73,7 @@ async def start(m: Message):
         )
         return
     bal = db_get_wallet(m.from_user.id)
-    welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
+    welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     await m.answer(
         welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
         reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
@@ -86,7 +86,7 @@ async def home(cb: CallbackQuery):
     if getattr(cb.message.chat, "type", "private") != "private":
         return
     bal = db_get_wallet(cb.from_user.id)
-    welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
+    welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     await cb.message.edit_text(
         welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
         reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
@@ -111,8 +111,8 @@ async def plan_select(cb: CallbackQuery):
     if bal < price:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="افزایش موجودی", callback_data="topup")],
-                [InlineKeyboardButton(text="بازگشت", callback_data="buy")],
+                [InlineKeyboardButton(text="➕ افزایش موجودی", callback_data="topup")],
+                [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="buy")],
             ]
         )
         await cb.message.edit_text(
@@ -126,7 +126,7 @@ async def plan_select(cb: CallbackQuery):
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="تایید و ادامه خرید", callback_data=f"confirm:{pid}")],
-            [InlineKeyboardButton(text="بازگشت", callback_data="buy")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="buy")],
         ]
     )
     await cb.message.edit_text(
@@ -191,11 +191,11 @@ async def buy_confirm(cb: CallbackQuery):
         await cb.bot.send_photo(
             cb.from_user.id,
             BufferedInputFile(qr_bytes(sub_link).getvalue(), filename="pingx.png"),
-            caption="کد QR اشتراک شما:",
+            caption="🔗 QR و لینک اشتراک شما:",
         )
         await cb.bot.send_message(
             cb.from_user.id,
-            f"لینک اشتراک:\n<a href=\"{htmlesc(sub_link)}\">نمایش لینک</a>\n<code>{sub_link}</code>",
+            f"🔗 لینک اشتراک:\n<a href=\"{htmlesc(sub_link)}\">نمایش لینک</a>\n<code>{sub_link}</code>",
             parse_mode=ParseMode.HTML,
         )
     except Exception:
@@ -211,11 +211,11 @@ async def mysubs(cb: CallbackQuery):
     rows = user_purchases(cb.from_user.id)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="بازگشت", callback_data="home")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="home")],
         ]
     )
     if not rows:
-    await cb.message.edit_text("❌ هیچ اشتراکی برای شما ثبت نشده است.", reply_markup=kb)
+        await cb.message.edit_text("❌ هیچ اشتراکی برای شما ثبت نشده است.", reply_markup=kb)
         return
     await cb.message.edit_text("📜 اشتراک‌های شما:", reply_markup=kb_mysubs(rows))
 
@@ -280,7 +280,7 @@ async def sub_revoke(cb: CallbackQuery):
         client_id = r["three_xui_client_id"]
         await three_session.update_client(inbound_id, client_id, {"enable": False})
         cur.execute("UPDATE purchases SET meta=? WHERE id=?", ("revoked", pid))
-        await cb.message.edit_text("اشتراک غیرفعال شد.", reply_markup=kb_mysubs(user_purchases(cb.from_user.id)))
+        await cb.message.edit_text("🚫 اشتراک غیرفعال شد.", reply_markup=kb_mysubs(user_purchases(cb.from_user.id)))
     except Exception as e:
         await cb.answer(f"خطا: {e}", show_alert=True)
 
@@ -313,11 +313,9 @@ async def sub_stat_refresh(cb: CallbackQuery):
 async def recheck_join(cb: CallbackQuery):
     if getattr(cb.message.chat, "type", "private") != "private":
         return
-    from keyboards import kb_main, kb_force_join
-    from config import REQUIRED_CHANNEL
     try:
         bal = db_get_wallet(cb.from_user.id)
-        welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
+        welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
         await cb.message.edit_text(
             welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
             reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
@@ -343,9 +341,9 @@ async def fallback_main_menu(m: Message, state: FSMContext):
     if row:
         return
     bal = db_get_wallet(m.from_user.id)
-        welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
-        await m.answer(
-            welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
-            reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
-            parse_mode=ParseMode.HTML,
-        )
+    welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
+    await m.answer(
+        welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
+        reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
+        parse_mode=ParseMode.HTML,
+    )
