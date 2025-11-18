@@ -155,13 +155,6 @@ class ThreeXUISession:
                 None,
                 None,
             ),
-            (
-                "POST",
-                "/panel/inbounds/addClient",
-                {"id": int(inbound_id), "client": json.dumps(payload, ensure_ascii=False)},
-                None,
-                None,
-            ),
         ]
         last_err = None
         for method, path, json_body, data_body, headers in attempts:
@@ -194,6 +187,27 @@ class ThreeXUISession:
                     return {"client": v}
         except Exception as e:
             last_err = e
+
+        # Fallback: update inbound with appended client (panel/api/inbounds/update/:id)
+        try:
+            ib = await self.get_inbound(inbound_id)
+            if ib:
+                s = ib.get("settings")
+                s = json.loads(s) if isinstance(s, str) else (s or {})
+                clients = s.get("clients") or []
+                clients.append(payload)
+                s["clients"] = clients
+                await self.request(
+                    "POST",
+                    f"/panel/api/inbounds/update/{int(inbound_id)}",
+                    json_data={"id": int(inbound_id), "settings": json.dumps(s, ensure_ascii=False)},
+                )
+                v = await self._verify_client_added(inbound_id, email=email, client_id=new_id)
+                if v:
+                    return {"client": v}
+        except Exception as e:
+            last_err = e
+
         raise ThreeXUIError(f"addClient failed on all endpoints: {last_err}")
 
     async def update_client(self, inbound_id: int, client_id: str, client_payload: dict):
