@@ -8,9 +8,16 @@ from aiogram.filters import StateFilter
 
 from config import CARD_NUMBER, MAX_RECEIPT_PHOTOS, MAX_RECEIPT_MB, PAGE_SIZE_PAYMENTS
 from db import (
-    is_admin, get_admin_ids,
-    db_get_wallet, db_new_payment, db_get_payment, db_add_wallet, db_update_payment_status,
-    db_list_pending_payments_page, cur, get_setting,
+    is_admin,
+    get_admin_ids,
+    db_get_wallet,
+    db_new_payment,
+    db_get_payment,
+    db_add_wallet,
+    db_update_payment_status,
+    db_list_pending_payments_page,
+    cur,
+    get_setting,
 )
 from utils import htmlesc
 import json, re
@@ -60,6 +67,14 @@ async def wallet(cb: CallbackQuery):
     )
 
 
+def _kb_topup_amounts():
+    amounts = [150_000, 300_000, 500_000, 1_000_000]
+    rows = [[InlineKeyboardButton(text=f"{amt:,} تومان", callback_data=f"topamt:{amt}")] for amt in amounts]
+    rows.append([InlineKeyboardButton(text="↩️ بازگشت", callback_data="wallet")])
+    rows.append([InlineKeyboardButton(text="✏️ وارد کردن مبلغ دستی", callback_data="topcustom")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.callback_query(F.data == "topup")
 async def topup_ask_amount(cb: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -67,23 +82,14 @@ async def topup_ask_amount(cb: CallbackQuery, state: FSMContext):
     card_number = _runtime_card_number()
     max_photos = _runtime_max_photos()
     max_mb = _runtime_max_mb()
-    amounts = [150_000, 300_000, 500_000, 1_000_000]
-    kb_amounts = [
-        [InlineKeyboardButton(text=f"{amt:,} تومان", callback_data=f"topamt:{amt}")]
-        for amt in amounts
-    ]
-    kb_amounts.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="wallet")])
     msg = (
         "<b>🔼 افزایش موجودی</b>\n\n"
-        "یک مبلغ انتخاب کن، سپس رسید یا توضیحات را ارسال و در پایان <code>done</code> بزن.\n\n"
-        f"💳 <b>کارت مقصد:</b> <code>{card_number}</code>\n"
-        f"🖼 حداکثر تعداد عکس: {max_photos} | 📏 حداکثر حجم هر عکس: {max_mb}MB"
+        "یکی از مبالغ آماده را انتخاب کن یا مبلغ دلخواه را وارد کن.\n"
+        "بعد رسید یا توضیحات را بفرست و در پایان <code>done</code> بزن.\n\n"
+        f"💳 کارت مقصد: <code>{card_number}</code>\n"
+        f"🖼 حداکثر عکس: {max_photos} | 📏 حجم حداکثر هر عکس: {max_mb}MB"
     )
-    await cb.message.edit_text(
-        msg,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_amounts),
-        parse_mode=ParseMode.HTML,
-    )
+    await cb.message.edit_text(msg, reply_markup=_kb_topup_amounts(), parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data.startswith("topamt:"))
@@ -96,11 +102,19 @@ async def topup_select_amount(cb: CallbackQuery, state: FSMContext):
     await state.set_state(Topup.note)
     await cb.message.edit_text(
         f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\n"
-        "رسید یا توضیحات را ارسال کن و در پایان <code>done</code> بزن.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ انصراف", callback_data="wallet")]]
-        ),
+        "رسید یا توضیحات را بفرست و در پایان <code>done</code> بزن.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ بازگشت", callback_data="wallet")]]),
         parse_mode=ParseMode.HTML,
+    )
+
+
+@router.callback_query(F.data == "topcustom")
+async def topup_custom(cb: CallbackQuery, state: FSMContext):
+    await state.update_data(amount=None, photos=[], notes=[])
+    await state.set_state(Topup.amount)
+    await cb.message.edit_text(
+        "مبلغ دلخواه را به تومان وارد کن:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ بازگشت", callback_data="wallet")]]),
     )
 
 
@@ -109,12 +123,12 @@ async def topup_got_amount(m: Message, state: FSMContext):
     try:
         amount = int(str(m.text).replace(",", "").strip())
     except Exception:
-        await m.reply("⚠️ عدد واردشده نامعتبر است. لطفاً یک مبلغ صحیح بفرستید.")
+        await m.reply("⚠️ عدد واردشده نامعتبر است. لطفاً یک مبلغ صحیح بفرستید یا از دکمه‌ها استفاده کن.")
         return
     await state.update_data(amount=amount, photos=[], notes=[])
     logger.info("Topup amount set uid=%s amount=%s", m.from_user.id, amount)
     await state.set_state(Topup.note)
-    await m.reply("✅ مبلغ ثبت شد. اکنون رسید/توضیحات را بفرستید و در پایان <code>done</code> بزنید.")
+    await m.reply("✅ مبلغ ثبت شد. اکنون رسید/توضیحات را بفرست و در پایان <code>done</code> بزن.")
 
 
 @router.message(StateFilter(Topup.note), F.photo)
