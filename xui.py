@@ -95,6 +95,14 @@ class ThreeXUISession:
         return []
 
     async def get_inbound(self, inbound_id: int):
+        # direct get endpoint if available
+        for p in (f"/panel/api/inbounds/get/{inbound_id}",):
+            try:
+                d = await self.request("GET", p)
+                if isinstance(d, dict) and d.get("obj"):
+                    return d["obj"]
+            except Exception:
+                continue
         for it in await self.list_inbounds():
             if str(it.get("id")) == str(inbound_id):
                 return it
@@ -149,15 +157,8 @@ class ThreeXUISession:
             ),
             (
                 "POST",
-                f"/panel/api/inbounds/{int(inbound_id)}/addClient",
-                {"client": payload},
-                None,
-                None,
-            ),
-            (
-                "POST",
-                f"/panel/api/inbounds/{int(inbound_id)}/addClient",
-                {"settings": json.dumps({"clients": [payload]}, ensure_ascii=False)},
+                "/panel/inbounds/addClient",
+                {"id": int(inbound_id), "client": json.dumps(payload, ensure_ascii=False)},
                 None,
                 None,
             ),
