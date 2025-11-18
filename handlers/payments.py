@@ -1,3 +1,4 @@
+import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ParseMode
@@ -15,6 +16,7 @@ from utils import htmlesc
 import json, re
 
 router = Router()
+logger = logging.getLogger("pingx.payments")
 
 
 def _runtime_card_number() -> str:
@@ -91,6 +93,7 @@ async def topup_got_amount(m: Message, state: FSMContext):
         await m.reply("⚠️ عدد واردشده نامعتبر است. لطفاً یک مبلغ صحیح بفرستید.")
         return
     await state.update_data(amount=amount, photos=[], notes=[])
+    logger.info("Topup amount set uid=%s amount=%s", m.from_user.id, amount)
     await state.set_state(Topup.note)
     await m.reply("✅ مبلغ ثبت شد. اکنون رسید/توضیحات را بفرستید و در پایان <code>done</code> بزنید.")
 
@@ -128,6 +131,7 @@ async def topup_collect(m: Message, state: FSMContext):
     if m.text and m.text.strip().lower() == "done":
         note_txt = "\n".join(n for n in notes if n).strip()
         pid = db_new_payment(m.from_user.id, amount, note_txt, photos)
+        logger.info("Topup submitted uid=%s pid=%s amount=%s photos=%s note_len=%s", m.from_user.id, pid, amount, len(photos), len(note_txt))
         await state.clear()
         kb = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="مشاهده رسید", callback_data=f"payview:{pid}")]]
@@ -250,6 +254,7 @@ async def admin_pay_ok(cb: CallbackQuery):
         return await cb.answer("درخواست پیدا نشد", show_alert=True)
     db_add_wallet(r["user_id"], r["amount"])
     db_update_payment_status(pid, "approved")
+    logger.info("Topup approved pid=%s uid=%s amount=%s by_admin=%s", pid, r["user_id"], r["amount"], cb.from_user.id)
     try:
         await cb.bot.send_message(
             r["user_id"],

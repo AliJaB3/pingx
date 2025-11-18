@@ -1,3 +1,4 @@
+import logging
 from aiogram import Router, F
 from aiogram.enums import ParseMode, ChatMemberStatus
 from aiogram.filters import CommandStart
@@ -23,6 +24,7 @@ from datetime import datetime, timezone
 
 TZ = timezone.utc
 router = Router()
+logger = logging.getLogger("pingx.user")
 
 
 class Topup(StatesGroup):
@@ -144,6 +146,7 @@ async def buy_confirm(cb: CallbackQuery):
         return await cb.answer("پلن پیدا نشد")
     price = int(plan["price"])
     if not try_deduct_wallet(cb.from_user.id, price):
+        logger.warning("Buy failed insufficient wallet uid=%s plan=%s price=%s", cb.from_user.id, pid, price)
         return await cb.answer("موجودی کافی نیست.", show_alert=True)
     if not three_session:
         rollback_wallet(cb.from_user.id, price)
@@ -173,6 +176,7 @@ async def buy_confirm(cb: CallbackQuery):
     except Exception as e:
         rollback_wallet(cb.from_user.id, price)
         await cb.message.edit_text(f"خطا در ایجاد اشتراک:\n<code>{htmlesc(str(e))}</code>", parse_mode=ParseMode.HTML)
+        logger.exception("Add client failed uid=%s plan=%s", cb.from_user.id, pid)
         return
     db_new_purchase(
         user_id=cb.from_user.id,
@@ -199,7 +203,7 @@ async def buy_confirm(cb: CallbackQuery):
             parse_mode=ParseMode.HTML,
         )
     except Exception:
-        pass
+        logger.warning("Failed to send link/qr uid=%s", cb.from_user.id, exc_info=True)
     await cb.message.edit_text(
         get_setting("POST_PURCHASE_TEMPLATE", "✅ خرید انجام شد. لینک اشتراک برای شما ارسال شد."),
         reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
@@ -342,6 +346,7 @@ async def fallback_main_menu(m: Message, state: FSMContext):
         return
     bal = db_get_wallet(m.from_user.id)
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
+    logger.info("Fallback main menu uid=%s state=None text=%s", m.from_user.id, (m.text or "")[:200])
     await m.answer(
         welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
         reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
