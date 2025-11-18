@@ -140,28 +140,21 @@ class ThreeXUISession:
             "remark": remark,
         }
 
+        # طبق داکیومنت رسمی 3x-ui:
+        # POST /panel/api/inbounds/addClient
+        # body: { id: inbound_id, client: JSON-string-of-client }  یا settings شامل clients[]
         attempts = [
-            # form-encoded settings (as seen in panel)
-            (
-                "POST",
-                "/panel/api/inbounds/addClient",
-                None,
-                {"id": str(inbound_id), "settings": json.dumps({"clients": [payload]}, ensure_ascii=False)},
-                {"Content-Type": "application/x-www-form-urlencoded"},
-            ),
-            # json settings
-            (
-                "POST",
-                "/panel/api/inbounds/addClient",
-                {"id": int(inbound_id), "settings": json.dumps({"clients": [payload]}, ensure_ascii=False)},
-                None,
-                None,
-            ),
-            # json client legacy
             (
                 "POST",
                 "/panel/api/inbounds/addClient",
                 {"id": int(inbound_id), "client": json.dumps(payload, ensure_ascii=False)},
+                None,
+                None,
+            ),
+            (
+                "POST",
+                "/panel/api/inbounds/addClient",
+                {"id": int(inbound_id), "settings": json.dumps({"clients": [payload]}, ensure_ascii=False)},
                 None,
                 None,
             ),
