@@ -141,6 +141,15 @@ class ThreeXUISession:
         }
 
         attempts = [
+            # form-encoded settings (as seen in panel)
+            (
+                "POST",
+                "/panel/api/inbounds/addClient",
+                None,
+                {"id": str(inbound_id), "settings": json.dumps({"clients": [payload]}, ensure_ascii=False)},
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            ),
+            # json settings
             (
                 "POST",
                 "/panel/api/inbounds/addClient",
@@ -148,6 +157,7 @@ class ThreeXUISession:
                 None,
                 None,
             ),
+            # json client legacy
             (
                 "POST",
                 "/panel/api/inbounds/addClient",
