@@ -47,12 +47,12 @@ async def wallet(cb: CallbackQuery):
     bal = db_get_wallet(cb.from_user.id)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="افزایش موجودی", callback_data="topup")],
-            [InlineKeyboardButton(text="بازگشت", callback_data="home")],
+            [InlineKeyboardButton(text="➕ افزایش موجودی", callback_data="topup")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="home")],
         ]
     )
     await cb.message.edit_text(
-        f"موجودی کیف پول شما: <b>{bal:,}</b> تومان",
+        f"💰 موجودی کیف پول شما: <b>{bal:,}</b> تومان",
         reply_markup=kb,
         parse_mode=ParseMode.HTML,
     )
@@ -66,18 +66,18 @@ async def topup_ask_amount(cb: CallbackQuery, state: FSMContext):
     max_photos = _runtime_max_photos()
     max_mb = _runtime_max_mb()
     msg = (
-        "<b>افزایش موجودی</b>\n\n"
+        "<b>🔼 افزایش موجودی</b>\n\n"
         "۱) مبلغ موردنظر را به کارت زیر واریز کنید.\n"
         "۲) رسید یا توضیحات را ارسال کنید و در پایان عبارت <code>done</code> را بفرستید.\n\n"
-        f"<b>کارت مقصد:</b> <code>{card_number}</code>\n"
-        "حداقل مبلغ پیشنهادی: 150,000 تومان\n"
-        f"حداکثر تعداد عکس: {max_photos}\n"
-        f"حداکثر حجم هر عکس: {max_mb}MB"
+        f"💳 <b>کارت مقصد:</b> <code>{card_number}</code>\n"
+        "💵 حداقل مبلغ پیشنهادی: 150,000 تومان\n"
+        f"🖼 حداکثر تعداد عکس: {max_photos}\n"
+        f"📏 حداکثر حجم هر عکس: {max_mb}MB"
     )
     await cb.message.edit_text(
         msg,
         reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="بازگشت", callback_data="wallet")]]
+            inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="wallet")]]
         ),
         parse_mode=ParseMode.HTML,
     )
@@ -88,11 +88,11 @@ async def topup_got_amount(m: Message, state: FSMContext):
     try:
         amount = int(str(m.text).replace(",", "").strip())
     except Exception:
-        await m.reply("عدد واردشده نامعتبر است. لطفاً یک مبلغ صحیح بفرستید.")
+        await m.reply("⚠️ عدد واردشده نامعتبر است. لطفاً یک مبلغ صحیح بفرستید.")
         return
     await state.update_data(amount=amount, photos=[], notes=[])
     await state.set_state(Topup.note)
-    await m.reply("مبلغ ثبت شد. رسید/توضیحات را بفرستید و در پایان <code>done</code> بزنید.")
+    await m.reply("✅ مبلغ ثبت شد. اکنون رسید/توضیحات را بفرستید و در پایان <code>done</code> بزنید.")
 
 
 @router.message(StateFilter(Topup.note), F.photo)
@@ -106,17 +106,17 @@ async def collect_photo(m: Message, state: FSMContext):
     try:
         sz = int(m.photo[-1].file_size or 0)
         if sz > int(max_mb) * 1024 * 1024:
-            await m.reply("حجم این عکس از حد مجاز بیشتر است.")
+            await m.reply("⚠️ حجم این عکس از حد مجاز بیشتر است.")
             return
     except Exception:
         pass
     max_photos = _runtime_max_photos()
     if len(photos) >= max_photos:
-        await m.reply("بیش از حد مجاز عکس فرستاده‌اید.")
+        await m.reply("⚠️ بیش از حد مجاز عکس فرستاده‌اید.")
         return
     photos.append(m.photo[-1].file_id)
     await state.update_data(photos=photos)
-    await m.reply(f"عکس ثبت شد ({len(photos)}/{max_photos}).")
+    await m.reply(f"🖼 عکس ذخیره شد ({len(photos)}/{max_photos}).")
 
 
 @router.message(StateFilter(Topup.note))
@@ -158,11 +158,11 @@ async def topup_collect(m: Message, state: FSMContext):
         if note:
             notes.append(note)
             await state.update_data(notes=notes)
-            await m.reply("توضیح ثبت شد. در پایان <code>done</code> را بفرستید.")
+            await m.reply("📝 توضیح ثبت شد. در پایان <code>done</code> را بفرستید.")
 
 
 def _wallet_text(bal: int) -> str:
-    return f"موجودی فعلی شما: <b>{bal:,}</b> تومان"
+    return f"💰 موجودی فعلی شما: <b>{bal:,}</b> تومان"
 
 
 def _topup_main_keyboard():
@@ -202,9 +202,9 @@ async def admin_pending(cb: CallbackQuery):
 def kb(pid: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="تایید و شارژ", callback_data=f"payok:{pid}")],
-            [InlineKeyboardButton(text="رد پرداخت", callback_data=f"payno:{pid}")],
-            [InlineKeyboardButton(text="بازگشت", callback_data="admin:pending:0")],
+            [InlineKeyboardButton(text="✅ تایید و شارژ", callback_data=f"payok:{pid}")],
+            [InlineKeyboardButton(text="✖️ رد پرداخت", callback_data=f"payno:{pid}")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:pending:0")],
         ]
     )
 

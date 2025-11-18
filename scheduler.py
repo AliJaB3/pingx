@@ -24,7 +24,7 @@ async def scheduler(bot: Bot):
                             try:
                                 await bot.send_message(
                                     uid,
-                                    f"مصرف شما به {int(pct*100)}٪ از حجم بسته رسیده است.",
+                                    f"⚠️ مصرف شما به {int(pct*100)}٪ از حجم بسته رسیده است.",
                                 )
                             except Exception:
                                 pass
@@ -35,7 +35,7 @@ async def scheduler(bot: Bot):
                         try:
                             await bot.send_message(
                                 uid,
-                                f"اشتراک شما تا {days_left} روز دیگر منقضی می‌شود.",
+                                f"⏰ اشتراک شما تا {days_left} روز دیگر منقضی می‌شود.",
                             )
                         except Exception:
                             pass

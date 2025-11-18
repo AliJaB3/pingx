@@ -35,7 +35,7 @@ class ForceJoinMiddleware(BaseMiddleware):
                     if status not in ("member", "administrator", "creator"):
                         raise Exception("not member")
                 except Exception:
-                    text = "برای استفاده از ربات باید عضو کانال اعلام‌شده باشید."
+                    text = "📢 برای استفاده از ربات باید عضو کانال اعلام‌شده باشید."
                     if isinstance(event, Message):
                         await event.answer(text, reply_markup=kb_force_join(ch))
                     else:

@@ -23,8 +23,8 @@ class AdminReply(StatesGroup):
 def kb_ticket_user():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="بستن تیکت", callback_data="ticket:close")],
-            [InlineKeyboardButton(text="بازگشت", callback_data="home")],
+            [InlineKeyboardButton(text="🚪 بستن تیکت", callback_data="ticket:close")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="home")],
         ]
     )
 
@@ -39,7 +39,7 @@ async def user_support(cb: CallbackQuery):
     ).fetchone()
     if trow:
         await cb.message.edit_text(
-            f"شما یک تیکت باز دارید: #{trow['id']}\nمی‌توانید پیام جدید بفرستید یا ببندید.",
+            f"📨 شما یک تیکت باز دارید: #{trow['id']}\nمی‌توانید پیام جدید بفرستید یا ببندید.",
             reply_markup=kb_ticket_user(),
         )
     else:
@@ -54,7 +54,7 @@ async def user_support(cb: CallbackQuery):
             except Exception:
                 pass
         await cb.message.edit_text(
-            f"تیکت شما ایجاد شد: #{tid}\nپیام خود را ارسال کنید.",
+            f"🆘 تیکت شما ایجاد شد: #{tid}\nپیام خود را ارسال کنید.",
             reply_markup=kb_ticket_user(),
         )
 
@@ -76,11 +76,11 @@ async def user_ticket_close(cb: CallbackQuery):
         except Exception:
             pass
     await cb.message.edit_text(
-        "تیکت بسته شد.",
+        "✅ تیکت بسته شد.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="ایجاد تیکت جدید", callback_data="support")],
-                [InlineKeyboardButton(text="بازگشت", callback_data="home")],
+                [InlineKeyboardButton(text="🆕 ایجاد تیکت جدید", callback_data="support")],
+                [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="home")],
             ]
         ),
     )
@@ -179,7 +179,7 @@ async def admin_ticket_view(cb: CallbackQuery):
     size = 10
     rows, total = list_ticket_messages_page(tid, page, size)
     if not rows:
-        text = "پیامی در این صفحه نیست."
+        text = "ℹ️ پیامی در این صفحه نیست."
     else:
         text_lines = []
         for r in rows:
@@ -189,18 +189,18 @@ async def admin_ticket_view(cb: CallbackQuery):
     kb = []
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="قبلی", callback_data=f"adm:tkt:view:{tid}:{page-1}"))
+        nav.append(InlineKeyboardButton(text="⬅️ قبلی", callback_data=f"adm:tkt:view:{tid}:{page-1}"))
     if (page + 1) * size < total:
-        nav.append(InlineKeyboardButton(text="صفحه بعد", callback_data=f"adm:tkt:view:{tid}:{page+1}"))
+        nav.append(InlineKeyboardButton(text="⬅️ صفحه بعد", callback_data=f"adm:tkt:view:{tid}:{page+1}"))
     if nav:
         kb.append(nav)
     kb.append(
         [
-            InlineKeyboardButton(text="پاسخ", callback_data=f"adm:tkt:reply:{tid}"),
-            InlineKeyboardButton(text="بستن", callback_data=f"adm:tkt:close:{tid}"),
+            InlineKeyboardButton(text="✉️ پاسخ", callback_data=f"adm:tkt:reply:{tid}"),
+            InlineKeyboardButton(text="🚪 بستن", callback_data=f"adm:tkt:close:{tid}"),
         ]
     )
-    kb.append([InlineKeyboardButton(text="بازگشت", callback_data="admin:tickets:0")])
+    kb.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:tickets:0")])
     await cb.message.edit_text(text or "پیامی در این صفحه نیست.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
 
@@ -210,7 +210,7 @@ async def admin_ticket_close(cb: CallbackQuery):
         return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
     tid = int(re.match(r"^adm:tkt:close:(\d+)$", cb.data).group(1))
     ticket_close(tid)
-    await cb.answer("تیکت بسته شد.")
+    await cb.answer("✅ تیکت بسته شد.")
     await admin_tickets_list(cb)
 
 

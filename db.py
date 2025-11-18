@@ -192,9 +192,9 @@ def ensure_defaults():
     if not get_setting("REQUIRED_CHANNEL"):
         set_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)
     if not get_setting("WELCOME_TEMPLATE"):
-        set_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
+        set_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     if not get_setting("POST_PURCHASE_TEMPLATE"):
-        set_setting("POST_PURCHASE_TEMPLATE", "خرید انجام شد و لینک اشتراک ارسال شد.")
+        set_setting("POST_PURCHASE_TEMPLATE", "✅ خرید انجام شد و لینک اشتراک ارسال شد.")
     if not get_setting("CARD_NUMBER"):
         set_setting("CARD_NUMBER", CARD_NUMBER)
     if get_setting("SUB_HOST") is None:
@@ -210,15 +210,15 @@ def ensure_defaults():
     if get_setting("MAX_RECEIPT_MB") is None:
         set_setting("MAX_RECEIPT_MB", str(MAX_RECEIPT_MB))
     if not get_setting("PURCHASE_SUCCESS_TEMPLATE"):
-        set_setting("PURCHASE_SUCCESS_TEMPLATE", "اشتراک شما آماده شد. لینک برایتان ارسال شد.")
+        set_setting("PURCHASE_SUCCESS_TEMPLATE", "🥳 اشتراک شما آماده شد. لینک برایتان ارسال شد.")
     if not get_setting("PURCHASE_FAILED_TEMPLATE"):
-        set_setting("PURCHASE_FAILED_TEMPLATE", "ایجاد اشتراک با خطا مواجه شد. لطفاً با پشتیبانی در تماس باشید.")
+        set_setting("PURCHASE_FAILED_TEMPLATE", "⚠️ ایجاد اشتراک با خطا مواجه شد. لطفاً با پشتیبانی در تماس باشید.")
     if not get_setting("PAYMENT_RECEIPT_TEMPLATE"):
-        set_setting("PAYMENT_RECEIPT_TEMPLATE", "درخواست پرداخت شما ثبت شد و پس از بررسی اطلاع داده می‌شود.")
+        set_setting("PAYMENT_RECEIPT_TEMPLATE", "🧾 درخواست پرداخت شما ثبت شد و پس از بررسی اطلاع داده می‌شود.")
     if not get_setting("TICKET_OPENED_TEMPLATE"):
-        set_setting("TICKET_OPENED_TEMPLATE", "تیکت شما باز شد. پیام خود را بفرستید.")
+        set_setting("TICKET_OPENED_TEMPLATE", "🆘 تیکت شما باز شد. پیام خود را بفرستید.")
     if not get_setting("TICKET_CLOSED_TEMPLATE"):
-        set_setting("TICKET_CLOSED_TEMPLATE", "تیکت بسته شد. برای تیکت جدید دوباره پیام بدهید.")
+        set_setting("TICKET_CLOSED_TEMPLATE", "✅ تیکت بسته شد. برای تیکت جدید دوباره پیام بدهید.")
 
 
 def ensure_default_plans():

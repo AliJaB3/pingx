@@ -68,14 +68,14 @@ async def start(m: Message):
     save_or_update_user(m.from_user)
     if not await check_force_join(m.bot, m.from_user.id):
         await m.answer(
-            "برای استفاده از ربات لطفاً ابتدا عضو کانال اعلام‌شده شوید.",
+            "📢 برای استفاده از ربات لطفاً ابتدا عضو کانال اعلام‌شده شوید.",
             reply_markup=kb_force_join(get_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)),
         )
         return
     bal = db_get_wallet(m.from_user.id)
     welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
     await m.answer(
-        welcome + f"\n\nموجودی کیف پول: <b>{bal:,}</b> تومان",
+        welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
         reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
         parse_mode=ParseMode.HTML,
     )
@@ -88,7 +88,7 @@ async def home(cb: CallbackQuery):
     bal = db_get_wallet(cb.from_user.id)
     welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
     await cb.message.edit_text(
-        welcome + f"\n\nموجودی کیف پول: <b>{bal:,}</b> تومان",
+        welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
         reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
         parse_mode=ParseMode.HTML,
     )
@@ -97,7 +97,7 @@ async def home(cb: CallbackQuery):
 @router.callback_query(F.data == "buy")
 async def buy_menu(cb: CallbackQuery):
     plans = db_get_plans_for_user(is_admin(cb.from_user.id))
-    await cb.message.edit_text("یکی از پلن‌های زیر را انتخاب کن:", reply_markup=kb_plans(plans, is_admin(cb.from_user.id)))
+    await cb.message.edit_text("🎯 یکی از پلن‌های زیر را انتخاب کن:", reply_markup=kb_plans(plans, is_admin(cb.from_user.id)))
 
 
 @router.callback_query(F.data.startswith("plan:"))
@@ -116,7 +116,7 @@ async def plan_select(cb: CallbackQuery):
             ]
         )
         await cb.message.edit_text(
-            "موجودی کیف پول برای این خرید کافی نیست:\n"
+            "⚠️ موجودی کیف پول برای این خرید کافی نیست:\n"
             f"• مبلغ پلن: <b>{price:,}</b> تومان\n"
             f"• موجودی فعلی: <b>{bal:,}</b> تومان",
             reply_markup=kb,
@@ -130,7 +130,7 @@ async def plan_select(cb: CallbackQuery):
         ]
     )
     await cb.message.edit_text(
-        f"پلن انتخابی: <b>{plan['title']}</b>\nمبلغ: <b>{price:,}</b> تومان\nآیا تایید می‌کنی؟",
+        f"🛒 پلن انتخابی: <b>{plan['title']}</b>\n💵 مبلغ: <b>{price:,}</b> تومان\nآیا تایید می‌کنی؟",
         reply_markup=kb,
         parse_mode=ParseMode.HTML,
     )
@@ -147,7 +147,7 @@ async def buy_confirm(cb: CallbackQuery):
         return await cb.answer("موجودی کافی نیست.", show_alert=True)
     if not three_session:
         rollback_wallet(cb.from_user.id, price)
-        await cb.message.edit_text("اتصال به سرور اشتراک برقرار نشد. لطفاً بعداً تلاش کن یا به پشتیبانی اطلاع بده.")
+        await cb.message.edit_text("🚫 اتصال به سرور اشتراک برقرار نشد. لطفاً بعداً تلاش کن یا به پشتیبانی اطلاع بده.")
         return
     inbound_id = int(get_setting("ACTIVE_INBOUND_ID", str(THREEXUI_INBOUND_ID)))
     email = safe_name_from_user(cb.from_user)
@@ -201,7 +201,7 @@ async def buy_confirm(cb: CallbackQuery):
     except Exception:
         pass
     await cb.message.edit_text(
-        get_setting("POST_PURCHASE_TEMPLATE", "خرید انجام شد. لینک اشتراک برای شما ارسال شد."),
+        get_setting("POST_PURCHASE_TEMPLATE", "✅ خرید انجام شد. لینک اشتراک برای شما ارسال شد."),
         reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
     )
 
@@ -215,9 +215,9 @@ async def mysubs(cb: CallbackQuery):
         ]
     )
     if not rows:
-        await cb.message.edit_text("هیچ اشتراکی برای شما ثبت نشده است.", reply_markup=kb)
+    await cb.message.edit_text("❌ هیچ اشتراکی برای شما ثبت نشده است.", reply_markup=kb)
         return
-    await cb.message.edit_text("اشتراک‌های شما:", reply_markup=kb_mysubs(rows))
+    await cb.message.edit_text("📜 اشتراک‌های شما:", reply_markup=kb_mysubs(rows))
 
 
 @router.callback_query(F.data.startswith("sub:"))
@@ -235,7 +235,7 @@ async def sub_detail(cb: CallbackQuery):
         bar = progress_bar(used / total) if total > 0 else ""
         exp_txt = datetime.fromtimestamp(expiry / 1000, tz=TZ).strftime("%Y-%m-%d %H:%M") if expiry else "نامشخص"
         total_hr = "نامحدود" if total <= 0 else human_bytes(total)
-        usage_txt = f"مصرف: {human_bytes(used)} / {total_hr}\n{bar}\nانقضا: {exp_txt}"
+        usage_txt = f"📊 مصرف: {human_bytes(used)} / {total_hr}\n{bar}\n⏰ انقضا: {exp_txt}"
     text = (
         f"<b>اشتراک #{r['id']}</b>\n"
         f"پلن: {htmlesc(r['plan_id'])} | مبلغ: {r['price']:,} تومان\n"
@@ -261,7 +261,7 @@ async def sub_fix_link(cb: CallbackQuery):
     await cb.bot.send_photo(
         cb.from_user.id,
         BufferedInputFile(qr_bytes(link).getvalue(), filename="pingx.png"),
-        caption="QR و لینک جدید اشتراک:",
+        caption="🔗 QR و لینک جدید اشتراک:",
     )
     await cb.bot.send_message(cb.from_user.id, f"<a href=\"{htmlesc(link)}\">نمایش لینک</a>\n<code>{link}</code>", parse_mode=ParseMode.HTML)
     await cb.answer("لینک جدید صادر شد.")
@@ -305,7 +305,7 @@ async def sub_stat_refresh(cb: CallbackQuery):
     from db import cache_set_usage
 
     cache_set_usage(pid, int(stat.get("up") or 0), int(stat.get("down") or 0), total, expiry)
-    await cb.answer("آمار به‌روز شد")
+    await cb.answer("✅ آمار به‌روز شد")
     await sub_detail(cb)
 
 
@@ -319,13 +319,13 @@ async def recheck_join(cb: CallbackQuery):
         bal = db_get_wallet(cb.from_user.id)
         welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
         await cb.message.edit_text(
-            welcome + f"\n\nموجودی کیف پول: <b>{bal:,}</b> تومان",
+            welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
             reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
             parse_mode=ParseMode.HTML,
         )
     except Exception:
         await cb.message.edit_text(
-            "برای استفاده از ربات لازم است عضو کانال مشخص‌شده باشید.",
+            "📢 برای استفاده از ربات لازم است عضو کانال مشخص‌شده باشید.",
             reply_markup=kb_force_join(get_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)),
         )
 
@@ -343,9 +343,9 @@ async def fallback_main_menu(m: Message, state: FSMContext):
     if row:
         return
     bal = db_get_wallet(m.from_user.id)
-    welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
-    await m.answer(
-        welcome + f"\n\nموجودی کیف پول: <b>{bal:,}</b> تومان",
-        reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
-        parse_mode=ParseMode.HTML,
-    )
+        welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
+        await m.answer(
+            welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
+            reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
+            parse_mode=ParseMode.HTML,
+        )
