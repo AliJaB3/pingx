@@ -1,18 +1,18 @@
-﻿from aiogram import Router, F
+from aiogram import Router, F
 from aiogram.enums import ParseMode, ChatMemberStatus
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
-from db import is_admin, get_admin_ids
+from db import is_admin
 from config import THREEXUI_INBOUND_ID, SUB_PATH, SUB_PORT, SUB_SCHEME, SUB_HOST, REQUIRED_CHANNEL
 from db import (
     save_or_update_user,
     db_get_wallet, db_get_plans_for_user, db_get_plan,
     try_deduct_wallet, rollback_wallet,
     db_new_purchase, user_purchases, cache_get_usage,
-    set_setting, get_setting, cur, log_evt,
+    set_setting, get_setting, cur,
 )
 from keyboards import kb_main, kb_force_join, kb_plans, kb_mysubs, kb_sub_detail
 from utils import htmlesc, progress_bar, human_bytes, qr_bytes, safe_name_from_user
@@ -68,14 +68,14 @@ async def start(m: Message):
     save_or_update_user(m.from_user)
     if not await check_force_join(m.bot, m.from_user.id):
         await m.answer(
-            "برای ادامه لطفاً ابتدا در کانال اطلاع‌رسانی عضو شوید.",
+            "برای استفاده از ربات لطفاً ابتدا عضو کانال اعلام‌شده شوید.",
             reply_markup=kb_force_join(get_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)),
         )
         return
     bal = db_get_wallet(m.from_user.id)
-    welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌اِکس خوش آمدید!")
+    welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
     await m.answer(
-        welcome + f"\n\nموجودی شما: <b>{bal:,}</b> تومان",
+        welcome + f"\n\nموجودی کیف پول: <b>{bal:,}</b> تومان",
         reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
         parse_mode=ParseMode.HTML,
     )
@@ -86,9 +86,9 @@ async def home(cb: CallbackQuery):
     if getattr(cb.message.chat, "type", "private") != "private":
         return
     bal = db_get_wallet(cb.from_user.id)
-    welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌اِکس خوش آمدید!")
+    welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
     await cb.message.edit_text(
-        welcome + f"\n\nموجودی شما: <b>{bal:,}</b> تومان",
+        welcome + f"\n\nموجودی کیف پول: <b>{bal:,}</b> تومان",
         reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
         parse_mode=ParseMode.HTML,
     )
@@ -97,7 +97,7 @@ async def home(cb: CallbackQuery):
 @router.callback_query(F.data == "buy")
 async def buy_menu(cb: CallbackQuery):
     plans = db_get_plans_for_user(is_admin(cb.from_user.id))
-    await cb.message.edit_text("یکی از پلن‌های زیر را انتخاب کنید:", reply_markup=kb_plans(plans, is_admin(cb.from_user.id)))
+    await cb.message.edit_text("یکی از پلن‌های زیر را انتخاب کن:", reply_markup=kb_plans(plans, is_admin(cb.from_user.id)))
 
 
 @router.callback_query(F.data.startswith("plan:"))
@@ -111,26 +111,26 @@ async def plan_select(cb: CallbackQuery):
     if bal < price:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="افزایش موجودی 💳", callback_data="topup")],
-                [InlineKeyboardButton(text="بازگشت ↩️", callback_data="buy")],
+                [InlineKeyboardButton(text="افزایش موجودی", callback_data="topup")],
+                [InlineKeyboardButton(text="بازگشت", callback_data="buy")],
             ]
         )
         await cb.message.edit_text(
-            "موجودی کیف پول کافی نیست:\n"
-            f"• قیمت پلن: <b>{price:,}</b> تومان\n"
-            f"• موجودی شما: <b>{bal:,}</b> تومان",
+            "موجودی کیف پول برای این خرید کافی نیست:\n"
+            f"• مبلغ پلن: <b>{price:,}</b> تومان\n"
+            f"• موجودی فعلی: <b>{bal:,}</b> تومان",
             reply_markup=kb,
             parse_mode=ParseMode.HTML,
         )
         return
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="تایید و ادامه ✅", callback_data=f"confirm:{pid}")],
-            [InlineKeyboardButton(text="بازگشت ↩️", callback_data="buy")],
+            [InlineKeyboardButton(text="تایید و ادامه خرید", callback_data=f"confirm:{pid}")],
+            [InlineKeyboardButton(text="بازگشت", callback_data="buy")],
         ]
     )
     await cb.message.edit_text(
-        f"پلن انتخاب‌شده: <b>{plan['title']}</b>\nقیمت: <b>{price:,}</b> تومان\nبرای ادامه تایید کنید.",
+        f"پلن انتخابی: <b>{plan['title']}</b>\nمبلغ: <b>{price:,}</b> تومان\nآیا تایید می‌کنی؟",
         reply_markup=kb,
         parse_mode=ParseMode.HTML,
     )
@@ -147,7 +147,7 @@ async def buy_confirm(cb: CallbackQuery):
         return await cb.answer("موجودی کافی نیست.", show_alert=True)
     if not three_session:
         rollback_wallet(cb.from_user.id, price)
-        await cb.message.edit_text("اتصال به سرور برقرار نشد. لطفاً کمی بعد دوباره تلاش کنید.")
+        await cb.message.edit_text("اتصال به سرور اشتراک برقرار نشد. لطفاً بعداً تلاش کن یا به پشتیبانی اطلاع بده.")
         return
     inbound_id = int(get_setting("ACTIVE_INBOUND_ID", str(THREEXUI_INBOUND_ID)))
     email = safe_name_from_user(cb.from_user)
@@ -174,7 +174,7 @@ async def buy_confirm(cb: CallbackQuery):
         rollback_wallet(cb.from_user.id, price)
         await cb.message.edit_text(f"خطا در ایجاد اشتراک:\n<code>{htmlesc(str(e))}</code>", parse_mode=ParseMode.HTML)
         return
-    pid2 = db_new_purchase(
+    db_new_purchase(
         user_id=cb.from_user.id,
         plan_id=plan["id"],
         price=price,
@@ -191,21 +191,17 @@ async def buy_confirm(cb: CallbackQuery):
         await cb.bot.send_photo(
             cb.from_user.id,
             BufferedInputFile(qr_bytes(sub_link).getvalue(), filename="pingx.png"),
-            caption="QR کد یا لینک زیر را استفاده کنید.",
+            caption="کد QR اشتراک شما:",
         )
         await cb.bot.send_message(
             cb.from_user.id,
-            f"🔗 <a href=\"{htmlesc(sub_link)}\">باز کردن لینک اشتراک</a>\n<code>{sub_link}</code>",
+            f"لینک اشتراک:\n<a href=\"{htmlesc(sub_link)}\">نمایش لینک</a>\n<code>{sub_link}</code>",
             parse_mode=ParseMode.HTML,
         )
     except Exception:
         pass
-    extra = get_setting("PURCHASE_SUCCESS_TEMPLATE", get_setting("POST_PURCHASE_TEMPLATE", "")).strip()
-    if extra:
-        await cb.bot.send_message(cb.from_user.id, extra)
-    log_evt(cb.from_user.id, "purchase_confirm", {"purchase_id": pid2, "plan_id": plan["id"], "inbound_id": inbound_id})
     await cb.message.edit_text(
-        "خرید با موفقیت انجام شد ✅",
+        get_setting("POST_PURCHASE_TEMPLATE", "خرید انجام شد. لینک اشتراک برای شما ارسال شد."),
         reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
     )
 
@@ -213,14 +209,13 @@ async def buy_confirm(cb: CallbackQuery):
 @router.callback_query(F.data == "mysubs")
 async def mysubs(cb: CallbackQuery):
     rows = user_purchases(cb.from_user.id)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="بازگشت", callback_data="home")],
+        ]
+    )
     if not rows:
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="خرید اشتراک 🛒", callback_data="buy")],
-                [InlineKeyboardButton(text="بازگشت ↩️", callback_data="home")],
-            ]
-        )
-        await cb.message.edit_text("هنوز اشتراکی تهیه نکرده‌اید.", reply_markup=kb)
+        await cb.message.edit_text("هیچ اشتراکی برای شما ثبت نشده است.", reply_markup=kb)
         return
     await cb.message.edit_text("اشتراک‌های شما:", reply_markup=kb_mysubs(rows))
 
@@ -230,26 +225,23 @@ async def sub_detail(cb: CallbackQuery):
     pid = int(cb.data.split(":")[1])
     r = cur.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
     if not r or r["user_id"] != cb.from_user.id:
-        return await cb.answer("دسترسی مجاز نیست.", show_alert=True)
-    cached = cache_get_usage(pid)
-    usage_txt = "آمار مصرف هنوز ثبت نشده است. از دکمه «وضعیت مصرف» برای بروزرسانی استفاده کنید."
-    if cached:
-        up = int(cached.get("up") or 0)
-        down = int(cached.get("down") or 0)
-        total = int(cached.get("total") or 0)
-        used = up + down
-        pct = 0.0 if total <= 0 else min(1.0, used / total)
-        bar = progress_bar(pct)
+        return await cb.answer("این اشتراک یافت نشد یا برای شما نیست.", show_alert=True)
+    stat = cache_get_usage(pid)
+    usage_txt = ""
+    if stat:
+        used = int(stat.get("up") or 0) + int(stat.get("down") or 0)
+        total = int(stat.get("total") or 0)
+        expiry = int(stat.get("expiry_ms") or 0) or int(r["expiry_ms"] or 0)
+        bar = progress_bar(used / total) if total > 0 else ""
+        exp_txt = datetime.fromtimestamp(expiry / 1000, tz=TZ).strftime("%Y-%m-%d %H:%M") if expiry else "نامشخص"
         total_hr = "نامحدود" if total <= 0 else human_bytes(total)
-        exp_ts = int((cached.get("expiry_ms") or r["expiry_ms"] or 0) / 1000)
-        exp_txt = datetime.fromtimestamp(exp_ts, TZ).strftime('%Y-%m-%d %H:%M') if exp_ts else "-"
-        usage_txt = f"مصرف: {human_bytes(used)} / {total_hr} ({int(pct*100)}%)\n{bar}\nانقضا: {exp_txt}"
+        usage_txt = f"مصرف: {human_bytes(used)} / {total_hr}\n{bar}\nانقضا: {exp_txt}"
     text = (
         f"<b>اشتراک #{r['id']}</b>\n"
         f"پلن: {htmlesc(r['plan_id'])} | مبلغ: {r['price']:,} تومان\n"
-        f"Inbound: {r['three_xui_inbound_id']} | ClientId: <code>{r['three_xui_client_id']}</code>\n"
-        f"SubId: <code>{r['sub_id'] or '-'}</code>\n\n{usage_txt}"
     )
+    if usage_txt:
+        text += usage_txt
     await cb.message.edit_text(text, reply_markup=kb_sub_detail(pid), parse_mode=ParseMode.HTML)
 
 
@@ -258,55 +250,54 @@ async def sub_fix_link(cb: CallbackQuery):
     pid = int(cb.data.split(":")[1])
     r = cur.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
     if not r or r["user_id"] != cb.from_user.id:
-        return await cb.answer("اجازه دسترسی ندارید")
-    link = build_subscribe_url(r["sub_id"]) if r["sub_id"] else r["sub_link"]
-    try:
-        await cb.bot.send_photo(
-            cb.from_user.id,
-            BufferedInputFile(qr_bytes(link).getvalue(), filename=f"pingx-{pid}.png"),
-            caption="کد QR یا لینک:",
-        )
-    except Exception:
-        pass
-    await cb.bot.send_message(cb.from_user.id, f"<a href=\"{htmlesc(link)}\">باز کردن لینک اشتراک</a>\n<code>{link}</code>", parse_mode=ParseMode.HTML)
-    await cb.answer("لینک ارسال شد ✅")
+        return await cb.answer("این اشتراک یافت نشد یا برای شما نیست.", show_alert=True)
+    inbound_id = int(r["three_xui_inbound_id"])
+    client_id = r["three_xui_client_id"]
+    if not three_session:
+        return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
+    new_sub = await three_session.rotate_subid(inbound_id, client_id)
+    link = build_subscribe_url(new_sub)
+    cur.execute("UPDATE purchases SET sub_id=?, sub_link=? WHERE id=?", (new_sub, link, pid))
+    await cb.bot.send_photo(
+        cb.from_user.id,
+        BufferedInputFile(qr_bytes(link).getvalue(), filename="pingx.png"),
+        caption="QR و لینک جدید اشتراک:",
+    )
+    await cb.bot.send_message(cb.from_user.id, f"<a href=\"{htmlesc(link)}\">نمایش لینک</a>\n<code>{link}</code>", parse_mode=ParseMode.HTML)
+    await cb.answer("لینک جدید صادر شد.")
 
 
 @router.callback_query(F.data.startswith("subrevoke:"))
 async def sub_revoke(cb: CallbackQuery):
-    if not three_session:
-        return await cb.answer("اتصال به پنل تنظیم نشده", show_alert=True)
     pid = int(cb.data.split(":")[1])
     r = cur.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
     if not r or r["user_id"] != cb.from_user.id:
-        return await cb.answer("اجازه دسترسی ندارید")
-    inbound_id = int(r["three_xui_inbound_id"])
-    client_id = r["three_xui_client_id"]
+        return await cb.answer("این اشتراک یافت نشد یا برای شما نیست.", show_alert=True)
+    if not three_session:
+        return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
     try:
-        new_subid = await three_session.rotate_subid(inbound_id, client_id)
-        new_link = build_subscribe_url(new_subid)
-        cur.execute("UPDATE purchases SET sub_id=?, sub_link=? WHERE id=?", (new_subid, new_link, pid))
-        await cb.bot.send_message(cb.from_user.id, f"لینک جدید:\n<a href=\"{htmlesc(new_link)}\">باز کردن لینک اشتراک</a>\n<code>{new_link}</code>", parse_mode=ParseMode.HTML)
-        await cb.answer("لینک جدید ارسال شد ✅")
+        inbound_id = int(r["three_xui_inbound_id"])
+        client_id = r["three_xui_client_id"]
+        await three_session.update_client(inbound_id, client_id, {"enable": False})
+        cur.execute("UPDATE purchases SET meta=? WHERE id=?", ("revoked", pid))
+        await cb.message.edit_text("اشتراک غیرفعال شد.", reply_markup=kb_mysubs(user_purchases(cb.from_user.id)))
     except Exception as e:
-        msg = str(e)
-        msg = (msg[:180] + "…") if len(msg) > 180 else msg
-        await cb.answer(f"خطا: {msg}", show_alert=True)
+        await cb.answer(f"خطا: {e}", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("substat:"))
 async def sub_stat_refresh(cb: CallbackQuery):
     if not three_session:
-        return await cb.answer("اتصال به پنل تنظیم نشده", show_alert=True)
+        return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
     pid = int(cb.data.split(":")[1])
     r = cur.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
     if not r or r["user_id"] != cb.from_user.id:
-        return await cb.answer("اجازه دسترسی ندارید")
+        return await cb.answer("این اشتراک یافت نشد یا برای شما نیست.", show_alert=True)
     inbound_id = int(r["three_xui_inbound_id"])
     client_id = r["three_xui_client_id"]
     stat = await three_session.get_client_stats(inbound_id, client_id, r["client_email"])
     if not stat:
-        return await cb.answer("اطلاعات در دسترس نیست", show_alert=True)
+        return await cb.answer("آمار مصرفی در دسترس نیست", show_alert=True)
     total = int(stat.get("total") or 0)
     if total <= 0 and int(r["allocated_gb"] or 0) > 0:
         total = int(r["allocated_gb"]) * 1024 ** 3
@@ -314,60 +305,47 @@ async def sub_stat_refresh(cb: CallbackQuery):
     from db import cache_set_usage
 
     cache_set_usage(pid, int(stat.get("up") or 0), int(stat.get("down") or 0), total, expiry)
-    await cb.answer("به‌روزرسانی شد ✅")
+    await cb.answer("آمار به‌روز شد")
     await sub_detail(cb)
-
-
-
-
 
 
 @router.callback_query(F.data == "recheck_join")
 async def recheck_join(cb: CallbackQuery):
-    # Re-evaluate membership and route to home or show prompt
     if getattr(cb.message.chat, "type", "private") != "private":
         return
-    # Reuse existing welcome/home flow
-    from db import get_setting
     from keyboards import kb_main, kb_force_join
     from config import REQUIRED_CHANNEL
     try:
-        # Try to show home if passed middleware
         bal = db_get_wallet(cb.from_user.id)
-        welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌اِکس خوش آمدید!")
+        welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
         await cb.message.edit_text(
-            welcome + f"\n\nموجودی شما: <b>{bal:,}</b> تومان",
+            welcome + f"\n\nموجودی کیف پول: <b>{bal:,}</b> تومان",
             reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
             parse_mode=ParseMode.HTML,
         )
     except Exception:
         await cb.message.edit_text(
-            "برای استفاده از ربات، ابتدا در کانال عضو شوید.",
+            "برای استفاده از ربات لازم است عضو کانال مشخص‌شده باشید.",
             reply_markup=kb_force_join(get_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)),
         )
 
 
 @router.message()
 async def fallback_main_menu(m: Message, state: FSMContext):
-    # Private only
     if getattr(m.chat, "type", "private") != "private":
         return
-    # Skip commands
     if m.text and str(m.text).startswith("/"):
         return
-    # Skip if in FSM states (e.g., Topup)
     s = await state.get_state()
     if s:
         return
-    # Skip if user has open ticket (tickets router will handle)
     row = cur.execute("SELECT 1 FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1", (m.from_user.id,)).fetchone()
     if row:
         return
-    # Show main menu
     bal = db_get_wallet(m.from_user.id)
-    welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌اِکس خوش آمدید!")
+    welcome = get_setting("WELCOME_TEMPLATE", "به پینگ‌ایکس خوش آمدی!")
     await m.answer(
-        welcome + f"\n\nموجودی شما: <b>{bal:,}</b> تومان",
+        welcome + f"\n\nموجودی کیف پول: <b>{bal:,}</b> تومان",
         reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
         parse_mode=ParseMode.HTML,
     )
