@@ -20,6 +20,7 @@ def setup_logging():
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
     log_file = log_dir / "bot.log"
+    events_file = log_dir / "events.log"
     fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
     handlers = [
         logging.StreamHandler(),
@@ -27,14 +28,21 @@ def setup_logging():
     ]
     logging.basicConfig(level=logging.INFO, format=fmt, handlers=handlers)
 
+    events_logger = logging.getLogger("events")
+    events_logger.setLevel(logging.INFO)
+    if not events_logger.handlers:
+        events_logger.addHandler(RotatingFileHandler(events_file, maxBytes=2_000_000, backupCount=3, encoding="utf-8"))
+        events_logger.propagate = False
+
+    return logging.getLogger("pingx"), events_logger
+
 
 async def main():
-    setup_logging()
-    logger = logging.getLogger("pingx")
+    logger, events_logger = setup_logging()
     migrate(); ensure_defaults(); ensure_default_plans()
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
-    dp.update.middleware(LoggingMiddleware(logger))
+    dp.update.middleware(LoggingMiddleware(events_logger))
     dp.update.middleware(ForceJoinMiddleware())
 
     @dp.errors()
