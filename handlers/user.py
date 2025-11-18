@@ -260,7 +260,7 @@ async def sub_fix_link(cb: CallbackQuery):
     if not three_session:
         return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
     try:
-        new_sub = await three_session.rotate_subid(inbound_id, client_id)
+        new_sub = await three_session.rotate_subid(inbound_id, client_id, email=r.get("client_email"))
         link = build_subscribe_url(new_sub)
         cur.execute("UPDATE purchases SET sub_id=?, sub_link=? WHERE id=?", (new_sub, link, pid))
         await cb.bot.send_photo(

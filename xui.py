@@ -269,19 +269,22 @@ class ThreeXUISession:
                 last = e
         raise ThreeXUIError(f"updateClient failed: {last}")
 
-    async def rotate_subid(self, inbound_id: int, client_id: str) -> str:
+    async def rotate_subid(self, inbound_id: int, client_id: str, email: str | None = None) -> str:
         inbound = await self.get_inbound(inbound_id)
         if not inbound:
             raise ThreeXUIError("Inbound not found")
         s = inbound.get("settings")
         s = json.loads(s) if isinstance(s, str) else (s or {})
         hit = next((c for c in (s.get("clients") or []) if str(c.get("id")).replace("-", "") == str(client_id).replace("-", "")), None)
+        if not hit and email:
+            hit = await self._find_client_by_email(inbound_id, email)
         if not hit:
             raise ThreeXUIError("Client not found")
+        real_id = hit.get("id") or client_id
         new_sub = secrets.token_hex(8)
         payload = dict(hit)
         payload["subId"] = new_sub
-        await self.update_client(inbound_id, hit["id"], payload)
+        await self.update_client(inbound_id, real_id, payload)
         return new_sub
 
     async def get_client_stats(self, inbound_id: int, client_id: str, email: str | None = None):
