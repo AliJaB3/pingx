@@ -1,4 +1,5 @@
 import logging
+import re
 from aiogram import Router, F
 from aiogram.enums import ParseMode, ChatMemberStatus
 from aiogram.filters import CommandStart
@@ -36,6 +37,7 @@ def build_subscribe_url(sub_id: str) -> str:
     host = (get_setting("SUB_HOST", SUB_HOST) or "").strip()
     if not host:
         host = (three_session and three_session.base.split("://")[-1].split(":")[0]) or "localhost"
+    host = re.sub(r"^https?://", "", host, flags=re.IGNORECASE).strip("/")
     scheme = (get_setting("SUB_SCHEME", SUB_SCHEME) or SUB_SCHEME or "https").strip() or "https"
     path = (get_setting("SUB_PATH", SUB_PATH) or SUB_PATH or "/").strip() or "/"
     if not path.startswith("/"):
@@ -153,8 +155,13 @@ async def buy_confirm(cb: CallbackQuery):
         await cb.message.edit_text("🚫 اتصال به سرور اشتراک برقرار نشد. لطفاً بعداً تلاش کن یا به پشتیبانی اطلاع بده.")
         return
     inbound_id = int(get_setting("ACTIVE_INBOUND_ID", str(THREEXUI_INBOUND_ID)))
-    email = safe_name_from_user(cb.from_user)
-    remark = f"{(cb.from_user.full_name or cb.from_user.username or cb.from_user.id)} | {cb.from_user.id}"
+    base_email = safe_name_from_user(cb.from_user)
+    plan_slug = re.sub(r"[^A-Za-z0-9]+", "-", plan["title"]).strip("-") or "plan"
+    name_part, _, domain_part = base_email.partition("@")
+    domain_part = domain_part or "telegram"
+    uniq = secrets.token_hex(2)
+    email = f"{name_part}-{plan_slug}-{uniq}@{domain_part}"
+    remark = f"{(cb.from_user.full_name or cb.from_user.username or cb.from_user.id)} | {plan['title']} | {cb.from_user.id}"
     try:
         added = await three_session.add_client(
             inbound_id,
@@ -261,18 +268,22 @@ async def sub_fix_link(cb: CallbackQuery):
         return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
     try:
         client_email = r["client_email"] if "client_email" in r.keys() else None
-        new_sub = await three_session.rotate_subid(inbound_id, client_id, email=client_email)
-        link = build_subscribe_url(new_sub)
-        cur.execute("UPDATE purchases SET sub_id=?, sub_link=? WHERE id=?", (new_sub, link, pid))
+        # Prefer existing subId to avoid rotating when user just wants the current link
+        curr = await three_session.get_client_stats(inbound_id, client_id, client_email) or {}
+        sub_id = curr.get("subId") or r["sub_id"]
+        if not sub_id:
+            sub_id = await three_session.rotate_subid(inbound_id, client_id, email=client_email)
+        link = build_subscribe_url(sub_id)
+        cur.execute("UPDATE purchases SET sub_id=?, sub_link=? WHERE id=?", (sub_id, link, pid))
         await cb.bot.send_photo(
             cb.from_user.id,
             BufferedInputFile(qr_bytes(link).getvalue(), filename="pingx.png"),
-            caption="🔗 QR و لینک جدید اشتراک:",
+            caption="🔗 QR و لینک اشتراک:",
         )
         await cb.bot.send_message(cb.from_user.id, f"<a href=\"{htmlesc(link)}\">نمایش لینک</a>\n<code>{link}</code>", parse_mode=ParseMode.HTML)
-        await cb.answer("لینک جدید صادر شد.")
+        await cb.answer("لینک برای شما ارسال شد.")
     except Exception as e:
-        await cb.answer("خطا در صدور لینک جدید", show_alert=True)
+        await cb.answer("خطا در ارسال لینک", show_alert=True)
         try:
             logger.exception("rotate_subid failed pid=%s uid=%s", pid, cb.from_user.id)
         except Exception:
@@ -290,7 +301,28 @@ async def sub_revoke(cb: CallbackQuery):
     try:
         inbound_id = int(r["three_xui_inbound_id"])
         client_id = r["three_xui_client_id"]
-        await three_session.update_client(inbound_id, client_id, {"enable": False})
+        client_email = r["client_email"] if "client_email" in r.keys() else None
+        # Fetch full payload to avoid wiping other fields on update
+        inbound = await three_session.get_inbound(inbound_id)
+        payload = None
+        if inbound:
+            try:
+                s = inbound.get("settings")
+                s = json.loads(s) if isinstance(s, str) else (s or {})
+                payload = next(
+                    (c for c in (s.get("clients") or []) if str(c.get("id")).replace("-", "") == str(client_id).replace("-", "")),
+                    None,
+                )
+            except Exception:
+                payload = None
+        if not payload and client_email:
+            payload = await three_session.get_client_stats(inbound_id, client_id, client_email)
+        if not payload:
+            return await cb.answer("کلاینت پیدا نشد.", show_alert=True)
+        real_id = payload.get("id") or client_id
+        payload = dict(payload)
+        payload["enable"] = False
+        await three_session.update_client(inbound_id, real_id, payload)
         cur.execute("UPDATE purchases SET meta=? WHERE id=?", ("revoked", pid))
         await cb.message.edit_text("🚫 اشتراک غیرفعال شد.", reply_markup=kb_mysubs(user_purchases(cb.from_user.id)))
     except Exception as e:

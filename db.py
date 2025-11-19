@@ -188,28 +188,21 @@ def remove_admin(uid: int):
 
 
 def ensure_defaults():
-    if not get_setting("ACTIVE_INBOUND_ID"):
-        set_setting("ACTIVE_INBOUND_ID", str(THREEXUI_INBOUND_ID))
-    if not get_setting("REQUIRED_CHANNEL"):
-        set_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)
+    # Force non-editable settings to config values on each boot
+    set_setting("ACTIVE_INBOUND_ID", str(THREEXUI_INBOUND_ID))
+    set_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)
     if not get_setting("WELCOME_TEMPLATE"):
         set_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     if not get_setting("POST_PURCHASE_TEMPLATE"):
         set_setting("POST_PURCHASE_TEMPLATE", "✅ خرید انجام شد و لینک اشتراک ارسال شد.")
     if not get_setting("CARD_NUMBER"):
         set_setting("CARD_NUMBER", CARD_NUMBER)
-    if get_setting("SUB_HOST") is None:
-        set_setting("SUB_HOST", SUB_HOST or "")
-    if get_setting("SUB_SCHEME") is None:
-        set_setting("SUB_SCHEME", SUB_SCHEME or "https")
-    if get_setting("SUB_PATH") is None:
-        set_setting("SUB_PATH", SUB_PATH or "/sub/")
-    if get_setting("SUB_PORT") is None:
-        set_setting("SUB_PORT", str(SUB_PORT))
-    if get_setting("MAX_RECEIPT_PHOTOS") is None:
-        set_setting("MAX_RECEIPT_PHOTOS", str(MAX_RECEIPT_PHOTOS))
-    if get_setting("MAX_RECEIPT_MB") is None:
-        set_setting("MAX_RECEIPT_MB", str(MAX_RECEIPT_MB))
+    set_setting("SUB_HOST", SUB_HOST or "")
+    set_setting("SUB_SCHEME", SUB_SCHEME or "https")
+    set_setting("SUB_PATH", SUB_PATH or "/sub/")
+    set_setting("SUB_PORT", str(SUB_PORT))
+    set_setting("MAX_RECEIPT_PHOTOS", str(MAX_RECEIPT_PHOTOS))
+    set_setting("MAX_RECEIPT_MB", str(MAX_RECEIPT_MB))
     if not get_setting("PURCHASE_SUCCESS_TEMPLATE"):
         set_setting("PURCHASE_SUCCESS_TEMPLATE", "🥳 اشتراک شما آماده شد. لینک برایتان ارسال شد.")
     if not get_setting("PURCHASE_FAILED_TEMPLATE"):
