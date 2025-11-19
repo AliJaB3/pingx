@@ -221,26 +221,30 @@ def ensure_default_plans():
     if not get_setting(migration_flag):
         cur.executemany("DELETE FROM plans WHERE id=?", [(pid,) for pid in legacy_ids])
         set_setting(migration_flag, "1")
-    have = {r[0] for r in cur.execute("SELECT id FROM plans").fetchall()}
     defs = [
-        ("vol_lite", "حجمی لایت | ۳۰ روز | ۲۵ گیگ", 30, 25, 249_000, {}),
-        ("vol_plus", "حجمی پلاس | ۳۰ روز | ۵۰ گیگ", 30, 50, 285_000, {}),
-        ("vol_pro", "حجمی پرو | ۳۰ روز | ۱۰۰ گیگ", 30, 100, 3_150_000, {}),
-        ("vol_ultra", "حجمی اولترا | ۳۰ روز | ۲۰۰ گیگ", 30, 200, 3_249_000, {}),
-        ("time_gold", "زمانی گلد | ۳۰ روز | نامحدود حجمی", 30, 0, 299_000, {}),
-        ("time_platinum", "زمانی پلاتین | ۹۰ روز | نامحدود حجمی", 90, 0, 3_269_000, {}),
-        ("time_premium", "زمانی پرمیوم | ۱۸۰ روز | نامحدود حجمی", 180, 0, 3_499_000, {}),
-        ("time_diamond", "زمانی دیاموند | ۳۶۵ روز | نامحدود حجمی", 365, 0, 3_899_000, {}),
+        ("vol_lite", "پینگ لایت ⚡️ | ۲۵ گیگ | ۲ دستگاه | شروع اقتصادی", 30, 25, 49_000, {"device_limit": 2}),
+        ("vol_plus", "پینگ پلاس 🚀 | ۵۰ گیگ | ۲ دستگاه | مصرف روزمره و استریم سبک", 30, 50, 85_000, {"device_limit": 2}),
+        ("vol_pro", "پینگ پرو 💎 | ۱۰۰ گیگ | ۳ دستگاه | مناسب گیم و حرفه‌ای", 30, 100, 150_000, {"device_limit": 3}),
+        ("vol_ultra", "پینگ الترا 🏆 | ۲۰۰ گیگ | ۳ دستگاه | خانواده‌ها و پرمصرف‌ها", 30, 200, 249_000, {"device_limit": 3}),
+        ("time_gold", "ماهانه طلایی | ۳۰ روز | ۲ دستگاه | نامحدود واقعی", 30, 0, 99_000, {"device_limit": 2}),
+        ("time_platinum", "سه‌ماهه پلاتینیوم | ۹۰ روز | ۳ دستگاه | پشتیبانی VIP + سرور گیم", 90, 0, 269_000, {"device_limit": 3}),
+        ("time_premium", "شش‌ماهه پریمیوم | ۱۸۰ روز | ۳ دستگاه | سرور اختصاصی و پایدار", 180, 0, 499_000, {"device_limit": 3}),
+        ("time_diamond", "سالانه دیاموند | ۳۶۵ روز | ۳ دستگاه | تمدید خودکار و پشتیبانی ویژه", 365, 0, 899_000, {"device_limit": 3}),
         ("trial1", "تست ۱ روزه | رایگان", 1, 0, 0, {"test": True}),
         ("admtrial7", "تست ۷ روزه (ادمین)", 7, 0, 0, {"admin_only": True, "test": True}),
     ]
     for pid, title, days, gb, price, flags in defs:
-        if pid in have:
-            continue
-        cur.execute(
-            "INSERT INTO plans(id,title,days,gb,price,flags) VALUES(?,?,?,?,?,?)",
-            (pid, title, days, gb, price, json.dumps(flags, ensure_ascii=False)),
-        )
+        row = cur.execute("SELECT id FROM plans WHERE id=?", (pid,)).fetchone()
+        if row:
+            cur.execute(
+                "UPDATE plans SET title=?, days=?, gb=?, price=?, flags=? WHERE id=?",
+                (title, days, gb, price, json.dumps(flags, ensure_ascii=False), pid),
+            )
+        else:
+            cur.execute(
+                "INSERT INTO plans(id,title,days,gb,price,flags) VALUES(?,?,?,?,?,?)",
+                (pid, title, days, gb, price, json.dumps(flags, ensure_ascii=False)),
+            )
 
 
 def log_evt(actor_id: int, action: str, meta: dict):

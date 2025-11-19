@@ -66,7 +66,8 @@ def kb_mysubs(rows):
 def kb_sub_detail(purchase_id: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔗 نمایش لینک/QR", callback_data=f"subfix:{purchase_id}")],
+            [InlineKeyboardButton(text="📎 نمایش لینک فعلی", callback_data=f"sublink:{purchase_id}")],
+            [InlineKeyboardButton(text="♻️ صدور لینک جدید/QR", callback_data=f"subfix:{purchase_id}")],
             [InlineKeyboardButton(text="🚫 لغو اشتراک", callback_data=f"subrevoke:{purchase_id}")],
             [InlineKeyboardButton(text="📊 آمار مصرف", callback_data=f"substat:{purchase_id}")],
             [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="mysubs")],

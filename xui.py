@@ -132,18 +132,21 @@ class ThreeXUISession:
         stat = await self.get_client_stats(inbound_id, client_id=email, email=email)
         return stat
 
-    async def add_client(self, inbound_id: int, email: str, expire_days: int, data_gb: int, remark: str):
+    async def add_client(
+        self, inbound_id: int, email: str, expire_days: int, data_gb: int, remark: str, limit_ip: int | None = None
+    ):
         total = (int(data_gb) * 1024**3) if int(data_gb) > 0 else 0
         expiry = int((datetime.now(TZ) + timedelta(days=int(expire_days))).timestamp() * 1000)
         new_id = str(uuid4())
         sub_id = secrets.token_hex(6)
+        limit = max(0, int(limit_ip or 0))
         payload = {
             "id": new_id,
             "email": email,
             "enable": True,
             "expiryTime": expiry,
             "total": total,
-            "limitIp": 0,
+            "limitIp": limit,
             "subId": sub_id,
             "remark": remark,
         }
@@ -196,6 +199,9 @@ class ThreeXUISession:
                 if total > 0 and int(v.get("total") or 0) == 0:
                     v["total"] = total
                     need = True
+                if int(v.get("limitIp") or 0) != limit:
+                    v["limitIp"] = limit
+                    need = True
                 if need:
                     await self.update_client(inbound_id, v["id"], v)
                 v2 = await self._verify_client_added(inbound_id, email=email, client_id=v["id"])
@@ -244,6 +250,9 @@ class ThreeXUISession:
                         need = True
                     if not existing.get("email"):
                         existing["email"] = email
+                    if int(existing.get("limitIp") or 0) != limit:
+                        existing["limitIp"] = limit
+                        need = True
                     if need:
                         await self.update_client(inbound_id, existing["id"], existing)
                         existing = await self._verify_client_added(inbound_id, email=email, client_id=existing["id"])

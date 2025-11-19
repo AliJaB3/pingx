@@ -1,27 +1,35 @@
+import json
 import logging
 import re
+import secrets
+from datetime import datetime, timezone
+
 from aiogram import Router, F
 from aiogram.enums import ParseMode, ChatMemberStatus
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import Message, CallbackQuery, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
-from db import is_admin
 from config import THREEXUI_INBOUND_ID, SUB_PATH, SUB_PORT, SUB_SCHEME, SUB_HOST, REQUIRED_CHANNEL
 from db import (
     save_or_update_user,
-    db_get_wallet, db_get_plans_for_user, db_get_plan,
-    try_deduct_wallet, rollback_wallet,
-    db_new_purchase, user_purchases, cache_get_usage,
-    set_setting, get_setting, cur,
+    db_get_wallet,
+    db_get_plans_for_user,
+    db_get_plan,
+    try_deduct_wallet,
+    rollback_wallet,
+    db_new_purchase,
+    user_purchases,
+    cache_get_usage,
+    set_setting,
+    get_setting,
+    cur,
+    is_admin,
 )
 from keyboards import kb_main, kb_force_join, kb_plans, kb_mysubs, kb_sub_detail
 from utils import htmlesc, progress_bar, human_bytes, qr_bytes, safe_name_from_user
 from xui import three_session
-
-import secrets
-from datetime import datetime, timezone
 
 TZ = timezone.utc
 router = Router()
@@ -31,6 +39,43 @@ logger = logging.getLogger("pingx.user")
 class Topup(StatesGroup):
     amount = State()
     note = State()
+
+
+async def _deliver_subscription_link(bot, uid: int, link: str):
+    await bot.send_photo(
+        uid,
+        BufferedInputFile(qr_bytes(link).getvalue(), filename="pingx.png"),
+        caption="🔗 QR و لینک اشتراک شما:",
+    )
+    await bot.send_message(
+        uid,
+        f"<a href=\"{htmlesc(link)}\">مشاهده لینک</a>\n<code>{link}</code>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def _resolve_subscription_link(row, mode: str = "local") -> str:
+    link = row.get("sub_link")
+    if mode == "local" and link:
+        return link
+    if not three_session:
+        raise RuntimeError("panel_unavailable")
+    inbound_id = int(row["three_xui_inbound_id"])
+    client_id = row["three_xui_client_id"]
+    client_email = row["client_email"] if "client_email" in row.keys() else None
+    sub_id = row.get("sub_id")
+    if mode != "rotate":
+        try:
+            curr = await three_session.get_client_stats(inbound_id, client_id, client_email)
+        except Exception:
+            curr = None
+        if curr:
+            sub_id = curr.get("subId") or sub_id
+    if mode == "rotate" or not sub_id:
+        sub_id = await three_session.rotate_subid(inbound_id, client_id, email=client_email)
+    link = build_subscribe_url(sub_id)
+    cur.execute("UPDATE purchases SET sub_id=?, sub_link=? WHERE id=?", (sub_id, link, row["id"]))
+    return link
 
 
 def build_subscribe_url(sub_id: str) -> str:
@@ -162,6 +207,12 @@ async def buy_confirm(cb: CallbackQuery):
     uniq = secrets.token_hex(2)
     email = f"{name_part}-{plan_slug}-{uniq}@{domain_part}"
     remark = f"{(cb.from_user.full_name or cb.from_user.username or cb.from_user.id)} | {plan['title']} | {cb.from_user.id}"
+    flags = {}
+    try:
+        flags = json.loads(plan.get("flags") or "{}")
+    except Exception:
+        flags = {}
+    device_limit = int(flags.get("device_limit") or 0)
     try:
         added = await three_session.add_client(
             inbound_id,
@@ -169,6 +220,7 @@ async def buy_confirm(cb: CallbackQuery):
             expire_days=int(plan["days"]),
             data_gb=int(plan["gb"]),
             remark=remark,
+            limit_ip=device_limit,
         )
         client = added["client"]
         client_id = client["id"]
@@ -199,16 +251,7 @@ async def buy_confirm(cb: CallbackQuery):
         meta=None,
     )
     try:
-        await cb.bot.send_photo(
-            cb.from_user.id,
-            BufferedInputFile(qr_bytes(sub_link).getvalue(), filename="pingx.png"),
-            caption="🔗 QR و لینک اشتراک شما:",
-        )
-        await cb.bot.send_message(
-            cb.from_user.id,
-            f"🔗 لینک اشتراک:\n<a href=\"{htmlesc(sub_link)}\">نمایش لینک</a>\n<code>{sub_link}</code>",
-            parse_mode=ParseMode.HTML,
-        )
+        await _deliver_subscription_link(cb.bot, cb.from_user.id, sub_link)
     except Exception:
         logger.warning("Failed to send link/qr uid=%s", cb.from_user.id, exc_info=True)
     await cb.message.edit_text(
@@ -267,27 +310,31 @@ async def sub_fix_link(cb: CallbackQuery):
     if not three_session:
         return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
     try:
-        client_email = r["client_email"] if "client_email" in r.keys() else None
-        # Prefer existing subId to avoid rotating when user just wants the current link
-        curr = await three_session.get_client_stats(inbound_id, client_id, client_email) or {}
-        sub_id = curr.get("subId") or r["sub_id"]
-        if not sub_id:
-            sub_id = await three_session.rotate_subid(inbound_id, client_id, email=client_email)
-        link = build_subscribe_url(sub_id)
-        cur.execute("UPDATE purchases SET sub_id=?, sub_link=? WHERE id=?", (sub_id, link, pid))
-        await cb.bot.send_photo(
-            cb.from_user.id,
-            BufferedInputFile(qr_bytes(link).getvalue(), filename="pingx.png"),
-            caption="🔗 QR و لینک اشتراک:",
-        )
-        await cb.bot.send_message(cb.from_user.id, f"<a href=\"{htmlesc(link)}\">نمایش لینک</a>\n<code>{link}</code>", parse_mode=ParseMode.HTML)
+        link = await _resolve_subscription_link(dict(r), mode="rotate")
+        await _deliver_subscription_link(cb.bot, cb.from_user.id, link)
+        await cb.answer("لینک جدید صادر شد.")
+    except RuntimeError:
+        return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
+    except Exception:
+        logger.exception("rotate_subid failed pid=%s uid=%s", pid, cb.from_user.id)
+        await cb.answer("ارسال لینک با خطا مواجه شد.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("sublink:"))
+async def sub_show_link(cb: CallbackQuery):
+    pid = int(cb.data.split(":")[1])
+    r = cur.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
+    if not r or r["user_id"] != cb.from_user.id:
+        return await cb.answer("این اشتراک یافت نشد یا برای شما نیست.", show_alert=True)
+    try:
+        link = await _resolve_subscription_link(dict(r), mode="local")
+        await _deliver_subscription_link(cb.bot, cb.from_user.id, link)
         await cb.answer("لینک برای شما ارسال شد.")
-    except Exception as e:
-        await cb.answer("خطا در ارسال لینک", show_alert=True)
-        try:
-            logger.exception("rotate_subid failed pid=%s uid=%s", pid, cb.from_user.id)
-        except Exception:
-            pass
+    except RuntimeError:
+        return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
+    except Exception:
+        logger.exception("send sub link failed pid=%s uid=%s", pid, cb.from_user.id)
+        await cb.answer("ارسال لینک با خطا مواجه شد.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("subrevoke:"))
