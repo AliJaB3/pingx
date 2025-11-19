@@ -6,10 +6,10 @@
 - `deploy/pingx-bot.service`: نمونه فایل واحد سرویس systemd که باید در سرور کپی و ویرایش شود.
 
 فرضیات پیش‌فرض داخل فایل سرویس
-- مسیر پروژه: `/opt/pingx-bot`
-- محیط مجازی: `/opt/pingx-bot/.venv`
-- فایل env نقطه‌ای: `/opt/pingx-bot/.env`
-- کاربر/گروه اجرای سرویس: `pingx:pingx`
+- مسیر پروژه: `/opt/pingx`
+- محیط مجازی: `/opt/pingx/.venv`
+- فایل env نقطه‌ای: `/opt/pingx/.env`
+- کاربر/گروه اجرای سرویس: `root:root`
 
 در صورت تفاوت ساختار سرور، این مسیرها را مطابق نیاز خود تغییر دهید.
 
@@ -20,27 +20,26 @@
 - دسترسی sudo برای نصب سرویس
 
 گام 1: ساخت کاربر و پوشه پروژه
-- ایجاد کاربر سیستمی (اختیاری ولی توصیه‌شده):
-  sudo useradd --system --create-home --shell /usr/sbin/nologin pingx
-- ساخت مسیر پروژه و اعمال مالکیت:
-  sudo mkdir -p /opt/pingx-bot
-  sudo chown -R pingx:pingx /opt/pingx-bot
+- ??? ????? ?? ????? root ???? ??????? ????? ?? ???? ????? ??????? ????.
+- ???? ????? ?? ?????? ? ????? ???? ?????? ??? root ???? ?????:
+  sudo mkdir -p /opt/pingx
+  sudo chown -R root:root /opt/pingx
 
 گام 2: دریافت کد پروژه در سرور
 - با git:
-  sudo -u pingx git clone https://github.com/AliJaB3/pingx.git /opt/pingx-bot
-- یا اگر قبلاً کد را جای دیگری دارید، با rsync/scp به `/opt/pingx-bot` منتقل کنید و مالکیت را تنظیم کنید:
-  sudo chown -R pingx:pingx /opt/pingx-bot
+  sudo git clone https://github.com/AliJaB3/pingx.git /opt/pingx
+- یا اگر قبلاً کد را جای دیگری دارید، با rsync/scp به `/opt/pingx` منتقل کنید و مالکیت را تنظیم کنید:
+  sudo chown -R root:root /opt/pingx
 
 گام 3: ساخت محیط مجازی و نصب وابستگی‌ها
 - ایجاد venv و نصب پکیج‌ها:
-  sudo -u pingx python3 -m venv /opt/pingx-bot/.venv
-  sudo -u pingx /opt/pingx-bot/.venv/bin/pip install --upgrade pip
-  sudo -u pingx /opt/pingx-bot/.venv/bin/pip install -r /opt/pingx-bot/requirements.txt
+  sudo python3 -m venv /opt/pingx/.venv
+  sudo /opt/pingx/.venv/bin/pip install --upgrade pip
+  sudo /opt/pingx/.venv/bin/pip install -r /opt/pingx/requirements.txt
 
 گام 4: تنظیم فایل `.env`
 - در مسیر پروژه یک فایل `.env` بسازید و تنظیمات را وارد کنید:
-  sudo -u pingx nano /opt/pingx-bot/.env
+  sudo nano /opt/pingx/.env
 - مقادیر نمونه (بر اساس `config.py`):
   TELEGRAM_BOT_TOKEN=123456:ABCDEF-your-bot-token
   ADMIN_IDS=11111111,22222222
@@ -70,19 +69,19 @@
 
 گام 5: تست اجرای دستی (اختیاری اما مفید)
 - اجرای ربات در فورگراند جهت اطمینان از عدم خطا:
-  cd /opt/pingx-bot
-  sudo -u pingx /opt/pingx-bot/.venv/bin/python main.py
+  cd /opt/pingx
+  sudo /opt/pingx/.venv/bin/python main.py
 - با Ctrl+C خارج شوید. در صورت مشاهده خطایی مثل «Login to 3x-ui failed»، تنظیمات `.env` را بازبینی کنید.
 
 گام 6: نصب سرویس systemd
 - کپی فایل سرویس و ویرایش مسیرها در صورت نیاز:
-  sudo cp /opt/pingx-bot/deploy/pingx-bot.service /etc/systemd/system/pingx-bot.service
+  sudo cp /opt/pingx/deploy/pingx-bot.service /etc/systemd/system/pingx-bot.service
   sudo nano /etc/systemd/system/pingx-bot.service
 - موارد مهم داخل سرویس:
   - `User` و `Group` باید با کاربری که مالک پروژه است هماهنگ باشد (پیشنهاد: `pingx`).
-  - `WorkingDirectory` باید مسیر ریشه پروژه باشد: `/opt/pingx-bot`.
-  - `EnvironmentFile` باید به `.env` اشاره کند: `/opt/pingx-bot/.env`.
-  - `ExecStart` باید به باینری پایتون داخل venv اشاره کند: `/opt/pingx-bot/.venv/bin/python main.py`.
+  - `WorkingDirectory` باید مسیر ریشه پروژه باشد: `/opt/pingx`.
+  - `EnvironmentFile` باید به `.env` اشاره کند: `/opt/pingx/.env`.
+  - `ExecStart` باید به باینری پایتون داخل venv اشاره کند: `/opt/pingx/.venv/bin/python main.py`.
 
 گام 7: فعال‌سازی و اجرا
 - بارگذاری مجدد واحدها و فعال‌سازی سرویس:
@@ -94,19 +93,19 @@
 
 به‌روزرسانی کد و وابستگی‌ها
 - کشیدن آخرین تغییرات و ریستارت سرویس:
-  cd /opt/pingx-bot
-  sudo -u pingx git pull --ff-only
-  sudo -u pingx /opt/pingx-bot/.venv/bin/pip install -r requirements.txt
+  cd /opt/pingx
+  sudo git pull --ff-only
+  sudo /opt/pingx/.venv/bin/pip install -r requirements.txt
   sudo systemctl restart pingx-bot
 
 نکات امنیتی و سخت‌سازی
 - `NoNewPrivileges=true`, `PrivateTmp=true`, `ProtectSystem=full`, `ProtectHome=true` در سرویس فعال شده‌اند. در صورت نیاز به نوشتن خارج از مسیر پروژه یا SELinux، ممکن است لازم باشد آن‌ها را موقتاً غیرفعال یا تنظیم کنید.
-- مطمئن شوید فقط کاربر سرویس به `.env` و دیتابیس دسترسی دارد: `chmod 600 /opt/pingx-bot/.env` و مالکیت `pingx:pingx`.
+- مطمئن شوید فقط کاربر سرویس به `.env` و دیتابیس دسترسی دارد: `chmod 600 /opt/pingx/.env` و مالکیت `root:root`.
 
 عیب‌یابی متداول
 - برنامه بلافاصله می‌ایستد: مقدار `TELEGRAM_BOT_TOKEN` در `.env` تنظیم نشده است.
 - خطای 3x-ui: آدرس/نام کاربری/رمز عبور یا `THREEXUI_INBOUND_ID` نادرست است؛ یا پنل در دسترس نیست.
-- `permission denied` روی دیتابیس: مالکیت/مجوزهای مسیر `/opt/pingx-bot` را برای کاربر سرویس درست کنید.
+- `permission denied` روی دیتابیس: مالکیت/مجوزهای مسیر `/opt/pingx` را برای کاربر سرویس درست کنید.
 - مسیر `ExecStart` اشتباه: نسخه پایتون یا مسیر venv چک شود.
 - سرویس اجرا نمی‌شود پس از ویرایش سرویس: `sudo systemctl daemon-reload` را فراموش نکنید.
 
