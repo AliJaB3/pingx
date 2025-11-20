@@ -46,14 +46,24 @@ def _runtime_max_mb() -> int:
 
 
 class Topup(StatesGroup):
+    amount = State()
     note = State()
 
 
 def _kb_amounts():
     amounts = [150_000, 300_000, 500_000, 1_000_000, 2_000_000]
     rows = [[InlineKeyboardButton(text=f"{amt:,} تومان", callback_data=f"topamt:{amt}")] for amt in amounts]
+    rows.append([InlineKeyboardButton(text="💵 مبلغ دلخواه", callback_data="topamt:custom")])
     rows.append([InlineKeyboardButton(text="↩️ بازگشت", callback_data="wallet")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _kb_custom_amount():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="↩️ بازگشت", callback_data="topup")],
+        ]
+    )
 
 
 def _kb_receipt_flow():
@@ -144,7 +154,7 @@ async def wallet(cb: CallbackQuery):
 @router.callback_query(F.data == "topup")
 async def topup_start(cb: CallbackQuery, state: FSMContext):
     await state.clear()
-    await state.set_state(Topup.note)
+    await state.set_state(Topup.amount)
     card_number = _runtime_card_number()
     max_photos = _runtime_max_photos()
     max_mb = _runtime_max_mb()
@@ -160,11 +170,19 @@ async def topup_start(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("topamt:"))
 async def topup_select_amount(cb: CallbackQuery, state: FSMContext):
+    if cb.data == "topamt:custom":
+        await state.set_state(Topup.amount)
+        await cb.message.edit_text(
+            "مبلغ موردنظر خود را به تومان با عدد ارسال کن.",
+            reply_markup=_kb_custom_amount(),
+        )
+        return
     try:
         amount = int(cb.data.split(":")[1])
     except Exception:
         return await cb.answer("مبلغ نامعتبر", show_alert=True)
     await state.update_data(amount=amount, media=[], notes=[])
+    await state.set_state(Topup.note)
     logger.info("Topup amount set uid=%s amount=%s", cb.from_user.id, amount)
     await cb.message.edit_text(
         f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\n"
@@ -222,7 +240,7 @@ async def collect_photo(m: Message, state: FSMContext):
         file_id=m.photo[-1].file_id,
         file_kind="photo",
         file_size=sz,
-        caption_text=m.html_caption or m.caption or "",
+        caption_text=m.caption or "",
     )
 
 
@@ -254,6 +272,26 @@ async def topup_collect(m: Message, state: FSMContext):
         notes.append(note)
         await state.update_data(notes=notes)
         await m.reply("📝 توضیح ثبت شد. رسید را ارسال کن تا درخواست به‌صورت خودکار ثبت شود.", reply_markup=_kb_amount_selected())
+
+
+@router.message(StateFilter(Topup.amount))
+async def topup_amount_manual(m: Message, state: FSMContext):
+    txt = (m.text or "").strip().replace(",", "").replace("٫", "").replace(" ", "")
+    try:
+        amount = int(txt)
+    except Exception:
+        return await m.reply("لطفاً مبلغ را فقط با اعداد ارسال کن.")
+    if amount <= 0:
+        return await m.reply("مبلغ باید بزرگ‌تر از صفر باشد.")
+    await state.update_data(amount=amount, media=[], notes=[])
+    await state.set_state(Topup.note)
+    logger.info("Topup custom amount set uid=%s amount=%s", m.from_user.id, amount)
+    await m.reply(
+        f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\n"
+        "رسید/توضیحات را بفرست؛ پس از دریافت عکس، درخواست به‌صورت خودکار ثبت می‌شود.",
+        reply_markup=_kb_amount_selected(),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 def _wallet_text(bal: int) -> str:

@@ -15,18 +15,27 @@ def kb_main(uid: int, is_admin: bool):
     return InlineKeyboardMarkup(inline_keyboard=btns)
 
 
-def kb_force_join(channel: str):
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📢 عضویت در کانال",
-                    url=f"https://t.me/{channel.lstrip('@')}",
-                )
-            ],
-            [InlineKeyboardButton(text="🔄 بررسی عضویت", callback_data="recheck_join")],
+def kb_force_join(channels):
+    if isinstance(channels, str):
+        channels = [channels]
+    cleaned = []
+    for ch in channels:
+        ch = (ch or "").strip()
+        if not ch:
+            continue
+        label = ch if ch.startswith("@") else f"@{ch}"
+        cleaned.append(label)
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=f"عضویت در {label}",
+                url=f"https://t.me/{label.lstrip('@')}",
+            )
         ]
-    )
+        for label in cleaned
+    ]
+    rows.append([InlineKeyboardButton(text="🔄 بررسی عضویت", callback_data="recheck_join")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def kb_plans(plans, is_admin: bool):

@@ -191,6 +191,8 @@ def ensure_defaults():
     # Force non-editable settings to config values on each boot
     set_setting("ACTIVE_INBOUND_ID", str(THREEXUI_INBOUND_ID))
     set_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)
+    if not (get_setting("REQUIRED_CHANNELS") or "").strip():
+        set_setting("REQUIRED_CHANNELS", REQUIRED_CHANNEL)
     if not get_setting("WELCOME_TEMPLATE"):
         set_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     if not get_setting("POST_PURCHASE_TEMPLATE"):

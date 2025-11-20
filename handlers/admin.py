@@ -16,7 +16,7 @@ from db import (
     db_get_wallet, db_add_wallet, log_evt,
     db_list_plans, db_insert_plan, db_update_plan_field, db_delete_plan,
 )
-from utils import htmlesc, human_bytes
+from utils import htmlesc, human_bytes, parse_channel_list
 from xui import three_session
 from config import THREEXUI_INBOUND_ID, PAGE_SIZE_USERS
 
@@ -24,13 +24,16 @@ router = Router()
 
 
 SETTINGS_MENU = [
-    ("CARD_NUMBER", "????? ????"),
+    ("CARD_NUMBER", "شماره کارت"),
+    ("REQUIRED_CHANNELS", "کانال‌های اجباری"),
 ]
 
 SETTINGS_KEYS_PATTERN = "|".join(key for key, _ in SETTINGS_MENU)
 
 
-SETTINGS_META = {}
+SETTINGS_META = {
+    "REQUIRED_CHANNELS": {"type": "channels"},
+}
 
 
 @router.callback_query(F.data == "admin")
@@ -600,6 +603,11 @@ async def admin_settings_edit_recv(m: Message, state: FSMContext):
             val = val.strip()
             if val and not val.startswith("@"):
                 val = "@" + val
+        elif kind == "channels":
+            channels = parse_channel_list(val)
+            if not channels:
+                return await m.reply("حداقل یک کانال وارد کنید (با @ یا لینک).")
+            val = "\n".join(channels)
         elif kind == "path":
             val = (val or "/").strip() or "/"
             if not val.startswith("/"):

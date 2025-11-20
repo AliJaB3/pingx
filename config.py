@@ -11,6 +11,7 @@ ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS","").replace(" ","").split(","
 DB_PATH = os.getenv("DB_PATH","bot.db")
 
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL","@piingx").strip() or "@piingx"
+REQUIRED_CHANNELS = os.getenv("REQUIRED_CHANNELS","").strip() or REQUIRED_CHANNEL
 
 THREEXUI_BASE_URL = os.getenv("THREEXUI_BASE_URL","").rstrip("/")
 THREEXUI_USERNAME  = os.getenv("THREEXUI_USERNAME","")

@@ -29,12 +29,13 @@ from db import (
     is_admin,
 )
 from keyboards import kb_main, kb_force_join, kb_plans, kb_mysubs, kb_sub_detail
-from utils import htmlesc, progress_bar, human_bytes, qr_bytes, safe_name_from_user
+from utils import htmlesc, progress_bar, human_bytes, qr_bytes, safe_name_from_user, parse_channel_list
 from xui import three_session
 
 TZ = timezone.utc
 router = Router()
 logger = logging.getLogger("pingx.user")
+SUBSTAT_LOCK = asyncio.Lock()
 
 
 class Topup(StatesGroup):
@@ -100,15 +101,24 @@ def build_subscribe_url(sub_id: str) -> str:
     return f"{scheme}://{host}:{port}{path}{sub_id}"
 
 
+def _required_channels_list() -> list[str]:
+    raw = (get_setting("REQUIRED_CHANNELS", "").strip() or get_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL) or REQUIRED_CHANNEL)
+    return parse_channel_list(raw)
+
+
 async def check_force_join(bot, uid: int) -> bool:
-    ch = get_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)
-    if not ch:
+    channels = _required_channels_list()
+    if not channels:
         return True
-    try:
-        cm = await bot.get_chat_member(ch, uid)
-        return cm.status in (ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR)
-    except Exception:
-        return True
+    for ch in channels:
+        try:
+            cm = await bot.get_chat_member(ch, uid)
+            status = getattr(cm, "status", None)
+            if status not in (ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR):
+                return False
+        except Exception:
+            return False
+    return True
 
 
 @router.message(CommandStart())
@@ -118,8 +128,8 @@ async def start(m: Message):
     save_or_update_user(m.from_user)
     if not await check_force_join(m.bot, m.from_user.id):
         await m.answer(
-            "📢 برای استفاده از ربات لطفاً ابتدا عضو کانال اعلام‌شده شوید.",
-            reply_markup=kb_force_join(get_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)),
+            "📢 برای استفاده از ربات لطفاً ابتدا در کانال‌های اعلام‌شده عضو شوید.",
+            reply_markup=kb_force_join(_required_channels_list()),
         )
         return
     bal = db_get_wallet(m.from_user.id)
@@ -385,7 +395,10 @@ async def sub_stat_refresh(cb: CallbackQuery):
         return await cb.answer("این اشتراک یافت نشد یا برای شما نیست.", show_alert=True)
     inbound_id = int(r["three_xui_inbound_id"])
     client_id = r["three_xui_client_id"]
-    stat = await three_session.get_client_stats(inbound_id, client_id, r["client_email"])
+    if SUBSTAT_LOCK.locked():
+        return await cb.answer("در حال بررسی یک اشتراک دیگر هستیم. لطفاً چند لحظه دیگر تلاش کن.", show_alert=True)
+    async with SUBSTAT_LOCK:
+        stat = await three_session.get_client_stats(inbound_id, client_id, r["client_email"])
     if not stat:
         return await cb.answer("آمار مصرفی در دسترس نیست", show_alert=True)
     total = int(stat.get("total") or 0)
@@ -403,23 +416,24 @@ async def sub_stat_refresh(cb: CallbackQuery):
 async def recheck_join(cb: CallbackQuery):
     if getattr(cb.message.chat, "type", "private") != "private":
         return
-    try:
-        bal = db_get_wallet(cb.from_user.id)
-        welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
+    channels = _required_channels_list()
+    if not await check_force_join(cb.bot, cb.from_user.id):
         await cb.message.edit_text(
-            welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
-            reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
-            parse_mode=ParseMode.HTML,
+            "📢 هنوز عضو تمام کانال‌های موردنیاز نشده‌ای.",
+            reply_markup=kb_force_join(channels),
         )
-    except Exception:
-        await cb.message.edit_text(
-            "📢 برای استفاده از ربات لازم است عضو کانال مشخص‌شده باشید.",
-            reply_markup=kb_force_join(get_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)),
-        )
+        return
+    bal = db_get_wallet(cb.from_user.id)
+    welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
+    await cb.message.edit_text(
+        welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
+        reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 @router.message(StateFilter(None))
-async def fallback_main_menu(m: Message, state: FSMContext):
+async def fallback_main_menu(m: Message):
     if getattr(m.chat, "type", "private") != "private":
         return
     if m.text and str(m.text).startswith("/"):
