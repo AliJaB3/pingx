@@ -73,15 +73,39 @@ def _kb_amount_selected():
     )
 
 
-async def _submit_topup_request(bot, user, amount, photos, notes):
+def _normalize_media(items):
+    normalized = []
+    for entry in items:
+        if isinstance(entry, str):
+            normalized.append({"kind": "photo", "file_id": entry})
+        elif isinstance(entry, dict):
+            kind = (entry.get("kind") or "photo").lower()
+            fid = entry.get("file_id")
+            if fid:
+                normalized.append({"kind": kind, "file_id": fid})
+    return normalized
+
+
+async def _send_media(bot, chat_id, media, *, caption=None, parse_mode=None, reply_markup=None):
+    kind = (media.get("kind") or "photo").lower()
+    fid = media.get("file_id")
+    if not fid:
+        return None
+    if kind == "document":
+        return await bot.send_document(chat_id, fid, caption=caption, parse_mode=parse_mode, reply_markup=reply_markup)
+    return await bot.send_photo(chat_id, fid, caption=caption, parse_mode=parse_mode, reply_markup=reply_markup)
+
+
+async def _submit_topup_request(bot, user, amount, media, notes):
     note_txt = "\n".join(n for n in notes if n).strip()
-    pid = db_new_payment(user.id, amount, note_txt, photos)
+    media = _normalize_media(media)
+    pid = db_new_payment(user.id, amount, note_txt, media)
     logger.info(
         "Topup submitted uid=%s pid=%s amount=%s photos=%s note_len=%s",
         user.id,
         pid,
         amount,
-        len(photos),
+        len(media),
         len(note_txt),
     )
     action_kb = InlineKeyboardMarkup(
@@ -97,8 +121,8 @@ async def _submit_topup_request(bot, user, amount, photos, notes):
             if note_txt:
                 base_msg += f"\nتوضیحات: {htmlesc(note_txt)}"
             await bot.send_message(aid, base_msg, parse_mode=ParseMode.HTML)
-            for ph in photos:
-                await bot.send_photo(aid, ph, caption=f"رسید #{pid}")
+            for item in media:
+                await _send_media(bot, aid, item, caption=f"رسید #{pid}")
             await bot.send_message(aid, "اقدام:", reply_markup=action_kb)
         except Exception:
             continue
@@ -140,7 +164,7 @@ async def topup_select_amount(cb: CallbackQuery, state: FSMContext):
         amount = int(cb.data.split(":")[1])
     except Exception:
         return await cb.answer("مبلغ نامعتبر", show_alert=True)
-    await state.update_data(amount=amount, photos=[], notes=[])
+    await state.update_data(amount=amount, media=[], notes=[])
     logger.info("Topup amount set uid=%s amount=%s", cb.from_user.id, amount)
     await cb.message.edit_text(
         f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\n"
@@ -150,36 +174,72 @@ async def topup_select_amount(cb: CallbackQuery, state: FSMContext):
     )
 
 
-@router.message(StateFilter(Topup.note), F.photo)
-async def collect_photo(m: Message, state: FSMContext):
+async def _handle_receipt_upload(
+    m: Message,
+    state: FSMContext,
+    *,
+    file_id: str,
+    file_kind: str,
+    file_size: int,
+    caption_text: str,
+):
     data = await state.get_data()
     if not data or data.get("amount") is None:
         return
     amount = data.get("amount")
     notes = list(data.get("notes", []))
-    photos = list(data.get("photos", []))
+    media = list(data.get("media", []))
     max_mb = _runtime_max_mb()
-    try:
-        sz = int(m.photo[-1].file_size or 0)
-        if sz > int(max_mb) * 1024 * 1024:
-            await m.reply("⚠️ حجم این عکس از حد مجاز بیشتر است.", reply_markup=_kb_receipt_flow())
-            return
-    except Exception:
-        pass
-    max_photos = _runtime_max_photos()
-    if len(photos) >= max_photos:
-        await m.reply("⚠️ تعداد عکس بیش از حد مجاز است.", reply_markup=_kb_receipt_flow())
+    if file_size and file_size > int(max_mb) * 1024 * 1024:
+        await m.reply("⚠️ حجم این فایل از حد مجاز بیشتر است.", reply_markup=_kb_receipt_flow())
         return
-    photos.append(m.photo[-1].file_id)
-    caption_note = m.html_caption or m.caption or ""
-    if caption_note:
-        notes.append(caption_note)
+    max_photos = _runtime_max_photos()
+    if len(media) >= max_photos:
+        await m.reply("⚠️ تعداد فایل بیش از حد مجاز است.", reply_markup=_kb_receipt_flow())
+        return
+    media.append({"kind": file_kind, "file_id": file_id})
+    if caption_text:
+        notes.append(caption_text)
     await state.clear()
-    pid, _ = await _submit_topup_request(m.bot, m.from_user, amount, photos, notes)
+    pid, _ = await _submit_topup_request(m.bot, m.from_user, amount, media, notes)
     await m.reply(
         f"✅ رسید دریافت شد و با شماره #{pid} برای بررسی ارسال شد.",
         reply_markup=_topup_main_keyboard(),
         parse_mode=ParseMode.HTML,
+    )
+
+
+@router.message(StateFilter(Topup.note), F.photo)
+async def collect_photo(m: Message, state: FSMContext):
+    sz = 0
+    try:
+        sz = int(m.photo[-1].file_size or 0)
+    except Exception:
+        sz = 0
+    await _handle_receipt_upload(
+        m,
+        state,
+        file_id=m.photo[-1].file_id,
+        file_kind="photo",
+        file_size=sz,
+        caption_text=m.html_caption or m.caption or "",
+    )
+
+
+@router.message(StateFilter(Topup.note), F.document)
+async def collect_document(m: Message, state: FSMContext):
+    sz = 0
+    try:
+        sz = int(m.document.file_size or 0)
+    except Exception:
+        sz = 0
+    await _handle_receipt_upload(
+        m,
+        state,
+        file_id=m.document.file_id,
+        file_kind="document",
+        file_size=sz,
+        caption_text=m.caption or "",
     )
 
 
@@ -258,17 +318,19 @@ async def admin_pay_view(cb: CallbackQuery):
     if r.get("note"):
         text += f"توضیحات:\n{htmlesc(r['note'])}\n"
     try:
-        photos = json.loads(r.get("photos_json") or "[]")
+        media = json.loads(r.get("photos_json") or "[]")
     except Exception:
-        photos = []
-    if photos:
+        media = []
+    media = _normalize_media(media)
+    if media:
         try:
             await cb.message.delete()
         except Exception:
             pass
-        for i, ph in enumerate(photos):
+        for i, item in enumerate(media):
             caption = text if i == 0 else None
-            await cb.bot.send_photo(cb.from_user.id, ph, caption=caption, parse_mode=ParseMode.HTML, reply_markup=kb(pid) if i == 0 else None)
+            markup = kb(pid) if i == 0 else None
+            await _send_media(cb.bot, cb.from_user.id, item, caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
     else:
         await cb.message.edit_text(text, reply_markup=kb(pid), parse_mode=ParseMode.HTML)
 

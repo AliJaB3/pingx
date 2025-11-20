@@ -27,6 +27,10 @@ class AdminReply(StatesGroup):
     waiting = State()
 
 
+class UserTicket(StatesGroup):
+    waiting_first = State()
+
+
 def kb_user_ticket():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -48,66 +52,7 @@ def kb_admin_reply(tid: int):
     )
 
 
-@router.callback_query(F.data == "support")
-async def user_support(cb: CallbackQuery):
-    if getattr(cb.message.chat, "type", "private") != "private":
-        return
-    tid = get_or_open_ticket(cb.from_user.id)
-    for aid in get_admin_ids():
-        try:
-            await cb.bot.send_message(
-                aid,
-                f"🆘 تیکت #{tid} از <a href=\"tg://user?id={cb.from_user.id}\">{htmlesc(cb.from_user.full_name or cb.from_user.username or cb.from_user.id)}</a>",
-                parse_mode=ParseMode.HTML,
-            )
-        except Exception:
-            pass
-    await cb.message.edit_text(
-        f"تیکت شما ایجاد شد: #{tid}\nپیام خود را ارسال کنید.",
-        reply_markup=kb_user_ticket(),
-    )
-
-
-@router.callback_query(F.data == "ticket:close")
-async def user_ticket_close(cb: CallbackQuery):
-    if getattr(cb.message.chat, "type", "private") != "private":
-        return
-    row = cur.execute(
-        "SELECT id FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1",
-        (cb.from_user.id,),
-    ).fetchone()
-    if not row:
-        return await cb.answer("تیکت باز یافت نشد.", show_alert=True)
-    ticket_close(row["id"])
-    for aid in get_admin_ids():
-        try:
-            await cb.bot.send_message(aid, f"تیکت #{row['id']} توسط کاربر بسته شد.")
-        except Exception:
-            pass
-    await cb.message.edit_text(
-        "✅ تیکت بسته شد.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🆕 تیکت جدید", callback_data="support")],
-                [InlineKeyboardButton(text="↩️ بازگشت", callback_data="home")],
-            ]
-        ),
-    )
-
-
-@router.message(StateFilter(None))
-async def user_ticket_pipeline(m: Message):
-    if getattr(m.chat, "type", "private") != "private":
-        return
-    if m.text and m.text.startswith("/"):
-        return
-    t = cur.execute(
-        "SELECT id FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1",
-        (m.from_user.id,),
-    ).fetchone()
-    if not t:
-        return
-    tid = t["id"]
+async def _forward_user_ticket_message(m: Message, tid: int):
     ticket_set_activity(tid)
     header = (
         f"پیام جدید در تیکت #{tid} از "
@@ -136,6 +81,99 @@ async def user_ticket_pipeline(m: Message):
                 store_tmsg(tid, "user", m.from_user.id, "text", m.text or "", None, sent.message_id)
         except Exception:
             pass
+
+
+@router.callback_query(F.data == "support")
+async def user_support(cb: CallbackQuery, state: FSMContext):
+    if getattr(cb.message.chat, "type", "private") != "private":
+        return
+    await state.clear()
+    tid = get_or_open_ticket(cb.from_user.id)
+    await state.set_state(UserTicket.waiting_first)
+    await state.update_data(tid=tid)
+    for aid in get_admin_ids():
+        try:
+            await cb.bot.send_message(
+                aid,
+                f"🆘 تیکت #{tid} از <a href=\"tg://user?id={cb.from_user.id}\">{htmlesc(cb.from_user.full_name or cb.from_user.username or cb.from_user.id)}</a>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+    await cb.message.edit_text(
+        f"تیکت شما ایجاد شد: #{tid}\nپیام یا عکس خود را ارسال کنید تا برای ادمین ارسال شود.",
+        reply_markup=kb_user_ticket(),
+    )
+
+
+@router.callback_query(F.data == "ticket:close")
+async def user_ticket_close(cb: CallbackQuery, state: FSMContext):
+    if getattr(cb.message.chat, "type", "private") != "private":
+        return
+    row = cur.execute(
+        "SELECT id FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1",
+        (cb.from_user.id,),
+    ).fetchone()
+    if not row:
+        return await cb.answer("تیکت باز یافت نشد.", show_alert=True)
+    ticket_close(row["id"])
+    for aid in get_admin_ids():
+        try:
+            await cb.bot.send_message(aid, f"تیکت #{row['id']} توسط کاربر بسته شد.")
+        except Exception:
+            pass
+    await state.clear()
+    await cb.message.edit_text(
+        "✅ تیکت بسته شد.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🆕 تیکت جدید", callback_data="support")],
+                [InlineKeyboardButton(text="↩️ بازگشت", callback_data="home")],
+            ]
+        ),
+    )
+
+
+@router.message(StateFilter(UserTicket.waiting_first))
+async def user_ticket_first_message(m: Message, state: FSMContext):
+    if getattr(m.chat, "type", "private") != "private":
+        return
+    if m.text and m.text.startswith("/"):
+        return
+    data = await state.get_data()
+    tid = data.get("tid")
+    if not tid:
+        row = cur.execute(
+            "SELECT id FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1",
+            (m.from_user.id,),
+        ).fetchone()
+        if not row:
+            await m.answer("تیکت فعالی یافت نشد.")
+            await state.clear()
+            return
+        tid = row["id"]
+    await _forward_user_ticket_message(m, tid)
+    await state.clear()
+    await m.answer(
+        f"پیام شما برای ادمین‌های تیکت #{tid} ارسال شد. می‌توانید پیام‌های بعدی را هم ارسال کنید.",
+        reply_markup=kb_user_ticket(),
+    )
+
+
+@router.message(StateFilter(None))
+async def user_ticket_pipeline(m: Message):
+    if getattr(m.chat, "type", "private") != "private":
+        return
+    if m.text and m.text.startswith("/"):
+        return
+    t = cur.execute(
+        "SELECT id FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1",
+        (m.from_user.id,),
+    ).fetchone()
+    if not t:
+        return
+    tid = t["id"]
+    await _forward_user_ticket_message(m, tid)
 
 
 # --- Admin side ---

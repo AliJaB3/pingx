@@ -289,10 +289,10 @@ def rollback_wallet(uid: int, price: int):
     cur.execute("COMMIT")
 
 
-def db_new_payment(uid: int, amount: int, note: str, photos: list[str]):
+def db_new_payment(uid: int, amount: int, note: str, media: list[dict] | list[str]):
     cur.execute(
         "INSERT INTO payments(user_id,amount,note,photos_json,status,created_at) VALUES(?,?,?,?, 'pending', ?)",
-        (uid, amount, note, json.dumps(photos), now_iso()),
+        (uid, amount, note, json.dumps(media, ensure_ascii=False), now_iso()),
     )
     return cur.lastrowid
 

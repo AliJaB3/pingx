@@ -4,6 +4,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter
 
 from db import is_admin, get_admin_ids
 from keyboards import kb_admin_root
@@ -250,15 +251,18 @@ class PlanEdit(StatesGroup):
 
 
 @router.callback_query(F.data == "admin:plans")
-async def admin_plans_stub_redirect(cb: CallbackQuery):
+async def admin_plans_stub_redirect(cb: CallbackQuery, state: FSMContext):
     # Backward-compatibility if keyboard still points here
-    return await admin_plans(cb)
+    return await admin_plans(cb, state)
 
 
 @router.callback_query(F.data == "admin2:plans")
-async def admin_plans(cb: CallbackQuery):
+async def admin_plans(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    curr_state = await state.get_state()
+    if curr_state in {PlanNew.waiting.state, PlanEdit.waiting.state}:
+        await state.clear()
     plans = db_list_plans()
     kb = []
     for p in plans:
@@ -288,7 +292,7 @@ async def admin_plan_add(cb: CallbackQuery, state: FSMContext):
     )
 
 
-@router.message(PlanNew.waiting)
+@router.message(StateFilter(PlanNew.waiting))
 async def admin_plan_add_recv(m: Message, state: FSMContext):
     if m.text and m.text.strip().lower() == "/cancel":
         await state.clear()
@@ -303,7 +307,12 @@ async def admin_plan_add_recv(m: Message, state: FSMContext):
         price = int(price)
         db_insert_plan(pid, title, days, gb, price)
         await state.clear()
-        await m.reply("Plan added.")
+        await m.reply(
+            "Plan added.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="بازگشت به لیست پلن‌ها", callback_data="admin2:plans")]]
+            ),
+        )
     except Exception as e:
         return await m.reply(f"Invalid input: {e}")
 
@@ -342,9 +351,11 @@ def kb_plan_detail(p: dict):
 
 
 @router.callback_query(F.data.regexp(r"^admin2:plan:([^:]+)$"))
-async def admin_plan_view(cb: CallbackQuery):
+async def admin_plan_view(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    if await state.get_state() == PlanEdit.waiting.state:
+        await state.clear()
     pid = re.match(r"^admin2:plan:([^:]+)$", cb.data).group(1)
     p = db_get_plan(pid)
     if not p:
@@ -369,7 +380,7 @@ async def admin_plan_edit(cb: CallbackQuery, state: FSMContext):
     pid = m.group(1)
     field = m.group(2)
     await state.set_state(PlanEdit.waiting)
-    await state.update_data(pid=pid, field=field)
+    await state.update_data(pid=pid, field=field, back_cb=f"admin2:plan:{pid}")
     await cb.message.edit_text(
         f"Send new value for {field}:",
         reply_markup=InlineKeyboardMarkup(
@@ -378,12 +389,15 @@ async def admin_plan_edit(cb: CallbackQuery, state: FSMContext):
     )
 
 
-@router.message(PlanEdit.waiting)
+@router.message(StateFilter(PlanEdit.waiting))
 async def admin_plan_edit_recv(m: Message, state: FSMContext):
     data = await state.get_data()
     pid = data.get("pid")
     field = data.get("field")
+    back_cb = data.get("back_cb", f"admin2:plan:{pid}" if pid else "admin2:plans")
     val = (m.text or "").strip()
+    if not val:
+        return await m.reply("مقدار خالی مجاز نیست.")
     try:
         if field in ("days", "gb", "price"):
             val_int = int(val)
@@ -391,13 +405,18 @@ async def admin_plan_edit_recv(m: Message, state: FSMContext):
         else:
             db_update_plan_field(pid, field, val)
         await state.clear()
-        await m.reply("Updated.")
+        await m.reply(
+            "پلن به‌روزرسانی شد.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="بازگشت به پلن", callback_data=back_cb)]]
+            ),
+        )
     except Exception as e:
         await m.reply(f"Update failed: {e}")
 
 
 @router.callback_query(F.data.regexp(r"^admin2:plan:flag:([^:]+):(admin_only|test)$"))
-async def admin_plan_toggle_flag(cb: CallbackQuery):
+async def admin_plan_toggle_flag(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     m = re.match(r"^admin2:plan:flag:([^:]+):(admin_only|test)$", cb.data)
@@ -412,16 +431,16 @@ async def admin_plan_toggle_flag(cb: CallbackQuery):
         flags = {}
     flags[flag] = not bool(flags.get(flag))
     db_update_plan_field(pid, "flags", json.dumps(flags, ensure_ascii=False))
-    await admin_plan_view(cb)
+    await admin_plan_view(cb, state)
 
 
 @router.callback_query(F.data.regexp(r"^admin2:plan:del:([^:]+)$"))
-async def admin_plan_delete(cb: CallbackQuery):
+async def admin_plan_delete(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     pid = re.match(r"^admin2:plan:del:([^:]+)$", cb.data).group(1)
     db_delete_plan(pid)
-    await admin_plans(cb)
+    await admin_plans(cb, state)
 
 
 # --- Templates management ---
@@ -432,14 +451,16 @@ class TemplateEdit(StatesGroup):
 
 
 @router.callback_query(F.data == "admin:templates")
-async def admin_templates_stub_redirect(cb: CallbackQuery):
-    return await admin_templates(cb)
+async def admin_templates_stub_redirect(cb: CallbackQuery, state: FSMContext):
+    return await admin_templates(cb, state)
 
 
 @router.callback_query(F.data == "admin2:templates")
-async def admin_templates(cb: CallbackQuery):
+async def admin_templates(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    if await state.get_state() in {TemplateEdit.waiting.state, TemplateNew.waiting.state}:
+        await state.clear()
     w = get_setting("WELCOME_TEMPLATE", "(empty)")
     p = get_setting("POST_PURCHASE_TEMPLATE", "(empty)")
     txt = f"Templates:\nWELCOME_TEMPLATE:\n{w}\n\nPOST_PURCHASE_TEMPLATE:\n{p}"
@@ -459,7 +480,7 @@ async def admin_template_edit(cb: CallbackQuery, state: FSMContext):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     key = re.match(r"^admin2:t:edit:(WELCOME_TEMPLATE|POST_PURCHASE_TEMPLATE)$", cb.data).group(1)
     await state.set_state(TemplateEdit.waiting)
-    await state.update_data(key=key)
+    await state.update_data(key=key, back_cb="admin2:templates")
     await cb.message.edit_text(
         f"Send new value for {key} (HTML allowed):",
         reply_markup=InlineKeyboardMarkup(
@@ -468,13 +489,36 @@ async def admin_template_edit(cb: CallbackQuery, state: FSMContext):
     )
 
 
-@router.message(TemplateEdit.waiting)
+@router.callback_query(F.data.regexp(r"^admin2:alltpl:edit:(\d+):(.+)$"))
+async def admin_alltpl_edit(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    m = re.match(r"^admin2:alltpl:edit:(\d+):(.+)$", cb.data)
+    page = int(m.group(1))
+    key = m.group(2)
+    await state.set_state(TemplateEdit.waiting)
+    await state.update_data(key=key, back_cb=f"admin2:alltpl:{page}")
+    await cb.message.edit_text(
+        f"Send new value for {key} (HTML allowed):",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data=f"admin2:alltpl:{page}")]]
+        ),
+    )
+
+
+@router.message(StateFilter(TemplateEdit.waiting))
 async def admin_template_edit_recv(m: Message, state: FSMContext):
     data = await state.get_data()
     key = data.get("key")
+    back_cb = data.get("back_cb", "admin2:templates")
     set_setting(key, m.html_text or m.text or "")
     await state.clear()
-    await m.reply("Template updated.")
+    await m.reply(
+        "Template updated.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="بازگشت", callback_data=back_cb)]]
+        ),
+    )
 
 
 # --- Settings management ---
@@ -491,14 +535,16 @@ class TemplateNew(StatesGroup):
 
 
 @router.callback_query(F.data == "admin:settings")
-async def admin_settings_stub_redirect(cb: CallbackQuery):
-    return await admin_settings(cb)
+async def admin_settings_stub_redirect(cb: CallbackQuery, state: FSMContext):
+    return await admin_settings(cb, state)
 
 
 @router.callback_query(F.data == "admin2:settings")
-async def admin_settings(cb: CallbackQuery):
+async def admin_settings(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    if await state.get_state() in {SettingEdit.waiting.state, SettingNew.waiting.state}:
+        await state.clear()
     lines = []
     buttons = []
     for key, label in SETTINGS_MENU:
@@ -506,6 +552,12 @@ async def admin_settings(cb: CallbackQuery):
         safe_val = htmlesc(str(val if val not in (None, "") else "-"))
         lines.append(f"{label}: <code>{safe_val}</code>")
         buttons.append([InlineKeyboardButton(text=f"ویرایش {label}", callback_data=f"admin2:s:edit:{key}")])
+    buttons.append(
+        [
+            InlineKeyboardButton(text="📋 همه تنظیمات", callback_data="admin2:allsettings:0"),
+            InlineKeyboardButton(text="📝 همه قالب‌ها", callback_data="admin2:alltpl:0"),
+        ]
+    )
     buttons.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin")])
     txt = "تنظیمات کارت بانکی:\n" + "\n".join(lines)
     await cb.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode=ParseMode.HTML)
@@ -517,7 +569,7 @@ async def admin_settings_edit(cb: CallbackQuery, state: FSMContext):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     key = re.match(rf"^admin2:s:edit:({SETTINGS_KEYS_PATTERN})$", cb.data).group(1)
     await state.set_state(SettingEdit.waiting)
-    await state.update_data(key=key)
+    await state.update_data(key=key, back_cb="admin2:settings")
     await cb.message.edit_text(
         f"Send new value for {key}:",
         reply_markup=InlineKeyboardMarkup(
@@ -526,10 +578,11 @@ async def admin_settings_edit(cb: CallbackQuery, state: FSMContext):
     )
 
 
-@router.message(SettingEdit.waiting)
+@router.message(StateFilter(SettingEdit.waiting))
 async def admin_settings_edit_recv(m: Message, state: FSMContext):
     data = await state.get_data()
     key = data.get("key")
+    back_cb = data.get("back_cb", "admin2:settings")
     val = (m.text or "").strip()
     meta = SETTINGS_META.get(key)
     if meta:
@@ -560,7 +613,7 @@ async def admin_settings_edit_recv(m: Message, state: FSMContext):
     await m.reply(
         "تنظیم به‌روزرسانی شد.",
         reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="بازگشت به تنظیمات", callback_data="admin2:settings")]]
+            inline_keyboard=[[InlineKeyboardButton(text="بازگشت", callback_data=back_cb)]]
         ),
     )
 
@@ -581,75 +634,160 @@ def list_settings_page(where_clause:str|None, where_arg:str|None, page:int, size
 def kb_settings_list(rows, page:int, total:int, size:int, base_cb:str):
     kb=[]
     for r in rows:
-        kb.append([InlineKeyboardButton(text=f"{r['key']}", callback_data=f"{base_cb}:edit:{r['key']}")])
+        kb.append([InlineKeyboardButton(text=f"{r['key']}", callback_data=f"{base_cb}:edit:{page}:{r['key']}")])
     nav=[]
     if page>0: nav.append(InlineKeyboardButton(text="قبلی", callback_data=f"{base_cb}:{page-1}"))
     if (page+1)*size<total: nav.append(InlineKeyboardButton(text="بعدی", callback_data=f"{base_cb}:{page+1}"))
     if nav: kb.append(nav)
+    add_cb = f"{base_cb}:add:{page}"
     if base_cb.startswith("admin2:alltpl"):
-        kb.append([InlineKeyboardButton(text="Add Template", callback_data="admin2:t:add")])
+        kb.append([InlineKeyboardButton(text="Add Template", callback_data=add_cb)])
     else:
-        kb.append([InlineKeyboardButton(text="Add Setting", callback_data="admin2:s:add")])
+        kb.append([InlineKeyboardButton(text="Add Setting", callback_data=add_cb)])
     kb.append([InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin2:settings")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 @router.callback_query(F.data.regexp(r"^admin2:allsettings:(\d+)$"))
-async def admin_all_settings(cb:CallbackQuery):
+async def admin_all_settings(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    return await cb.answer("بخش تنظیمات عمومی غیرفعال شده است.", show_alert=True)
+    curr_state = await state.get_state()
+    if curr_state in {SettingNew.waiting.state, SettingEdit.waiting.state}:
+        await state.clear()
+    page = int(re.match(r"^admin2:allsettings:(\d+)$", cb.data).group(1))
+    size = 10
+    rows, total = list_settings_page(None, None, page, size)
+    if rows:
+        lines = [
+            f"{idx+1+page*size}. <b>{htmlesc(r['key'])}</b>: <code>{htmlesc(str(r.get('value') or ''))}</code>"
+            for idx, r in enumerate(rows)
+        ]
+        text = "📋 تمام تنظیمات ذخیره شده:\n" + "\n".join(lines)
+    else:
+        text = "تنظیمی برای نمایش وجود ندارد."
+    kb = kb_settings_list(rows, page, total, size, "admin2:allsettings")
+    await cb.message.edit_text(text, reply_markup=kb, parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data.regexp(r"^admin2:alltpl:(\d+)$"))
-async def admin_all_templates(cb:CallbackQuery):
+async def admin_all_templates(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    return await cb.answer("بخش تنظیمات عمومی غیرفعال شده است.", show_alert=True)
+    curr_state = await state.get_state()
+    if curr_state in {TemplateNew.waiting.state, TemplateEdit.waiting.state}:
+        await state.clear()
+    page = int(re.match(r"^admin2:alltpl:(\d+)$", cb.data).group(1))
+    size = 10
+    rows, total = list_settings_page("key LIKE ?", "%_TEMPLATE", page, size)
+    if rows:
+        lines = [
+            f"{idx+1+page*size}. <b>{htmlesc(r['key'])}</b>: <code>{htmlesc(str(r.get('value') or ''))}</code>"
+            for idx, r in enumerate(rows)
+        ]
+        text = "📝 قالب‌های ذخیره شده:\n" + "\n".join(lines)
+    else:
+        text = "قالبی برای نمایش وجود ندارد."
+    kb = kb_settings_list(rows, page, total, size, "admin2:alltpl")
+    await cb.message.edit_text(text, reply_markup=kb, parse_mode=ParseMode.HTML)
 
 
-@router.callback_query(F.data.regexp(r"^admin2:allsettings:edit:(.+)$"))
-async def admin_allsettings_edit(cb:CallbackQuery, state:FSMContext):
+@router.callback_query(F.data.regexp(r"^admin2:allsettings:edit:(\d+):(.+)$"))
+async def admin_allsettings_edit(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    await cb.answer("بخش تنظیمات عمومی غیرفعال شده است.", show_alert=True)
-    await state.clear()
+    m = re.match(r"^admin2:allsettings:edit:(\d+):(.+)$", cb.data)
+    page = int(m.group(1))
+    key = m.group(2)
+    await state.set_state(SettingEdit.waiting)
+    await state.update_data(key=key, back_cb=f"admin2:allsettings:{page}")
+    await cb.message.edit_text(
+        f"Send new value for {key}:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data=f"admin2:allsettings:{page}")]]
+        ),
+    )
 
 
-@router.callback_query(F.data.regexp(r"^admin2:alltpl:edit:(.+)$"))
-async def admin_alltpl_edit(cb:CallbackQuery, state:FSMContext):
+@router.callback_query(F.data.regexp(r"^admin2:allsettings:add:(\d+)$"))
+async def admin_setting_add(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    await cb.answer("بخش تنظیمات عمومی غیرفعال شده است.", show_alert=True)
+    page = int(re.match(r"^admin2:allsettings:add:(\d+)$", cb.data).group(1))
+    await state.set_state(SettingNew.waiting)
+    await state.update_data(back_cb=f"admin2:allsettings:{page}")
+    await cb.message.edit_text(
+        "کلید و مقدار را به صورت KEY=VALUE ارسال کن (کلید فقط حروف بزرگ/عدد/خط زیر).",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="انصراف", callback_data=f"admin2:allsettings:{page}")]]
+        ),
+    )
+
+
+@router.message(StateFilter(SettingNew.waiting))
+async def admin_setting_add_recv(m: Message, state: FSMContext):
+    data = await state.get_data()
+    back_cb = data.get("back_cb", "admin2:allsettings:0")
+    text = (m.text or "").strip()
+    if text.lower() == "/cancel":
+        await state.clear()
+        return await m.reply("لغو شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت", callback_data=back_cb)]]))
+    if "=" not in text:
+        return await m.reply("فرمت باید KEY=VALUE باشد.")
+    key, value = text.split("=", 1)
+    key = key.strip().upper()
+    value = value.strip()
+    if not re.fullmatch(r"[A-Z0-9_]+", key):
+        return await m.reply("کلید فقط باید شامل حروف بزرگ، اعداد و '_' باشد.")
+    set_setting(key, value)
     await state.clear()
+    await m.reply(
+        "تنظیم جدید ذخیره شد.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت", callback_data=back_cb)]]),
+    )
 
 
-@router.callback_query(F.data=="admin2:s:add")
-async def admin_setting_add(cb:CallbackQuery, state:FSMContext):
+@router.callback_query(F.data.regexp(r"^admin2:alltpl:add:(\d+)$"))
+async def admin_template_add(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    await cb.answer("بخش تنظیمات عمومی غیرفعال شده است.", show_alert=True)
+    page = int(re.match(r"^admin2:alltpl:add:(\d+)$", cb.data).group(1))
+    await state.set_state(TemplateNew.waiting)
+    await state.update_data(back_cb=f"admin2:alltpl:{page}")
+    await cb.message.edit_text(
+        "خط اول را با کلید (مثلاً WELCOME_TEMPLATE) و خطوط بعدی را با متن قالب (با پشتیبانی از HTML) ارسال کن.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="انصراف", callback_data=f"admin2:alltpl:{page}")]]
+        ),
+    )
+
+
+@router.message(StateFilter(TemplateNew.waiting))
+async def admin_template_add_recv(m: Message, state: FSMContext):
+    data = await state.get_data()
+    back_cb = data.get("back_cb", "admin2:alltpl:0")
+    plain = (m.text or "").strip()
+    if plain.lower() == "/cancel":
+        await state.clear()
+        return await m.reply("لغو شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت", callback_data=back_cb)]]))
+    text_plain = m.text or ""
+    parts_plain = text_plain.split("\n", 1)
+    key = parts_plain[0].strip().upper()
+    html_payload = m.html_text or m.text or ""
+    parts_html = html_payload.split("\n", 1)
+    value = parts_html[1] if len(parts_html) > 1 else ""
+    if not key:
+        return await m.reply("کلید نمی‌تواند خالی باشد.")
+    if not key.endswith("_TEMPLATE"):
+        return await m.reply("کلید قالب باید با _TEMPLATE پایان یابد.")
+    if not value:
+        return await m.reply("متن قالب را وارد کن.")
+    set_setting(key, value)
     await state.clear()
-
-
-@router.message(SettingNew.waiting)
-async def admin_setting_add_recv(m:Message, state:FSMContext):
-    await state.clear()
-    await m.reply("تنظیمات عمومی غیرفعال شده است.")
-
-
-@router.callback_query(F.data=="admin2:t:add")
-async def admin_template_add(cb:CallbackQuery, state:FSMContext):
-    if not is_admin(cb.from_user.id):
-        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    await cb.answer("تعریف قالب جدید غیرفعال شده است.", show_alert=True)
-    await state.clear()
-
-
-@router.message(TemplateNew.waiting)
-async def admin_template_add_recv(m:Message, state:FSMContext):
-    await state.clear()
-    await m.reply("تعریف قالب جدید غیرفعال شده است.")
+    await m.reply(
+        "قالب جدید ذخیره شد.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="بازگشت", callback_data=back_cb)]]),
+    )
 
 
 @router.callback_query(F.data == "admin:paneltest")
@@ -712,7 +850,7 @@ async def admin_admins_add(cb:CallbackQuery, state:FSMContext):
     await state.set_state(AdminEdit.add)
     await cb.message.edit_text("آیدی عددی تلگرام کاربر را ارسال کنید:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:admins:0")]]))
 
-@router.message(AdminEdit.add)
+@router.message(StateFilter(AdminEdit.add))
 async def admin_admins_add_recv(m:Message, state:FSMContext):
     try:
         uid=int(str(m.text).strip())
