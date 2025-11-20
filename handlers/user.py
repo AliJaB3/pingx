@@ -10,7 +10,7 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.exceptions import SkipHandler
+from aiogram.filters import StateFilter
 
 from config import THREEXUI_INBOUND_ID, SUB_PATH, SUB_PORT, SUB_SCHEME, SUB_HOST, REQUIRED_CHANNEL
 from db import (
@@ -291,10 +291,8 @@ async def sub_detail(cb: CallbackQuery):
         exp_txt = datetime.fromtimestamp(expiry / 1000, tz=TZ).strftime("%Y-%m-%d %H:%M") if expiry else "نامشخص"
         total_hr = "نامحدود" if total <= 0 else human_bytes(total)
         usage_txt = f"📊 مصرف: {human_bytes(used)} / {total_hr}\n{bar}\n⏰ انقضا: {exp_txt}"
-    text = (
-        f"<b>اشتراک #{r['id']}</b>\n"
-        f"پلن: {htmlesc(r['plan_id'])} | مبلغ: {r['price']:,} تومان\n"
-    )
+    text = f"<b>اشتراک #{r['id']}</b>\n"
+    text += f"پلن: {htmlesc(r['plan_id'])} | مبلغ: {r['price']:,} تومان\n"
     if usage_txt:
         text += usage_txt
     await cb.message.edit_text(text, reply_markup=kb_sub_detail(pid), parse_mode=ParseMode.HTML)
@@ -420,26 +418,23 @@ async def recheck_join(cb: CallbackQuery):
         )
 
 
-@router.message()
-@router.message()
+@router.message(StateFilter(None))
 async def fallback_main_menu(m: Message, state: FSMContext):
     if getattr(m.chat, "type", "private") != "private":
-        raise SkipHandler
+        return
     if m.text and str(m.text).startswith("/"):
-        raise SkipHandler
-    s = await state.get_state()
-    if s:
-        raise SkipHandler
-    row = cur.execute("SELECT 1 FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1", (m.from_user.id,)).fetchone()
+        return
+    row = cur.execute(
+        "SELECT 1 FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1",
+        (m.from_user.id,),
+    ).fetchone()
     if row:
-        raise SkipHandler
+        return
     bal = db_get_wallet(m.from_user.id)
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدید!")
     logger.info("Fallback main menu uid=%s state=None text=%s", m.from_user.id, (m.text or "")[:200])
     await m.answer(
-        welcome + f"
-
-💰 موجودی فعلی شما: <b>{bal:,}</b> تومان",
+        welcome + f"\n\n💰 موجودی فعلی شما: <b>{bal:,}</b> تومان",
         reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
         parse_mode=ParseMode.HTML,
     )
