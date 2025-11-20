@@ -59,7 +59,6 @@ def _kb_amounts():
 def _kb_receipt_flow():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✅ ثبت و ارسال برای ادمین", callback_data="topdone")],
             [InlineKeyboardButton(text="↩️ انصراف", callback_data="wallet")],
         ]
     )
@@ -68,11 +67,42 @@ def _kb_receipt_flow():
 def _kb_amount_selected():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📎 ارسال رسید", callback_data="nosend")],
-            [InlineKeyboardButton(text="✅ ثبت و ارسال برای ادمین", callback_data="topdone")],
             [InlineKeyboardButton(text="↩️ تغییر مبلغ", callback_data="topup")],
+            [InlineKeyboardButton(text="❌ لغو و بازگشت", callback_data="wallet")],
         ]
     )
+
+
+async def _submit_topup_request(bot, user, amount, photos, notes):
+    note_txt = "\n".join(n for n in notes if n).strip()
+    pid = db_new_payment(user.id, amount, note_txt, photos)
+    logger.info(
+        "Topup submitted uid=%s pid=%s amount=%s photos=%s note_len=%s",
+        user.id,
+        pid,
+        amount,
+        len(photos),
+        len(note_txt),
+    )
+    action_kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="مشاهده رسید", callback_data=f"payview:{pid}")]]
+    )
+    for aid in get_admin_ids():
+        try:
+            base_msg = (
+                f"پرداخت جدید #{pid}\n"
+                f"از <a href=\"tg://user?id={user.id}\">{htmlesc(user.full_name or user.username or str(user.id))}</a>\n"
+                f"مبلغ: {amount:,}"
+            )
+            if note_txt:
+                base_msg += f"\nتوضیحات: {htmlesc(note_txt)}"
+            await bot.send_message(aid, base_msg, parse_mode=ParseMode.HTML)
+            for ph in photos:
+                await bot.send_photo(aid, ph, caption=f"رسید #{pid}")
+            await bot.send_message(aid, "اقدام:", reply_markup=action_kb)
+        except Exception:
+            continue
+    return pid, note_txt
 
 
 @router.callback_query(F.data == "wallet")
@@ -97,7 +127,7 @@ async def topup_start(cb: CallbackQuery, state: FSMContext):
     msg = (
         "<b>🔼 افزایش موجودی</b>\n"
         "یک مبلغ را از دکمه‌ها انتخاب کن.\n"
-        "بعد رسید یا توضیحات را بفرست و در پایان \"ثبت\" را بزن.\n\n"
+        "بعد رسید یا توضیحات را بفرست؛ به محض دریافت اولین عکس، درخواست به‌صورت خودکار ثبت می‌شود.\n\n"
         f"💳 کارت مقصد: <code>{card_number}</code>\n"
         f"🖼 حداکثر عکس: {max_photos} | 📏 حداکثر حجم هر عکس: {max_mb}MB"
     )
@@ -114,25 +144,10 @@ async def topup_select_amount(cb: CallbackQuery, state: FSMContext):
     logger.info("Topup amount set uid=%s amount=%s", cb.from_user.id, amount)
     await cb.message.edit_text(
         f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\n"
-        "رسید/توضیحات را بفرست و در پایان «ثبت و ارسال برای ادمین» را بزن.",
+        "رسید/توضیحات را بفرست؛ پس از دریافت عکس، درخواست به‌صورت خودکار ثبت می‌شود.",
         reply_markup=_kb_amount_selected(),
         parse_mode=ParseMode.HTML,
     )
-
-
-@router.callback_query(F.data == "nosend")
-async def topup_prompt_receipt(cb: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    if not data or data.get("amount") is None:
-        return await cb.answer("ابتدا مبلغ شارژ را انتخاب کن.", show_alert=True)
-    max_photos = _runtime_max_photos()
-    max_mb = _runtime_max_mb()
-    msg = (
-        "رسید/توضیحات را بفرست و در پایان «ثبت و ارسال برای ادمین» را بزن.\n"
-        f"📎 می‌توانی حداکثر {max_photos} عکس تا {max_mb}MB برای هر عکس بفرستی."
-    )
-    await cb.message.answer(msg, reply_markup=_kb_receipt_flow())
-    await cb.answer()
 
 
 @router.message(StateFilter(Topup.note), F.photo)
@@ -140,7 +155,9 @@ async def collect_photo(m: Message, state: FSMContext):
     data = await state.get_data()
     if not data or data.get("amount") is None:
         return
-    photos = data.get("photos", [])
+    amount = data.get("amount")
+    notes = list(data.get("notes", []))
+    photos = list(data.get("photos", []))
     max_mb = _runtime_max_mb()
     try:
         sz = int(m.photo[-1].file_size or 0)
@@ -154,8 +171,16 @@ async def collect_photo(m: Message, state: FSMContext):
         await m.reply("⚠️ تعداد عکس بیش از حد مجاز است.", reply_markup=_kb_receipt_flow())
         return
     photos.append(m.photo[-1].file_id)
-    await state.update_data(photos=photos)
-    await m.reply(f"🖼 عکس ذخیره شد ({len(photos)}/{max_photos}).", reply_markup=_kb_receipt_flow())
+    caption_note = m.html_caption or m.caption or ""
+    if caption_note:
+        notes.append(caption_note)
+    await state.clear()
+    pid, _ = await _submit_topup_request(m.bot, m.from_user, amount, photos, notes)
+    await m.reply(
+        f"✅ رسید دریافت شد و با شماره #{pid} برای بررسی ارسال شد.",
+        reply_markup=_topup_main_keyboard(),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 @router.message(StateFilter(Topup.note))
@@ -163,45 +188,12 @@ async def topup_collect(m: Message, state: FSMContext):
     data = await state.get_data()
     if not data or data.get("amount") is None:
         return
-    amount = data.get("amount")
-    photos = data.get("photos", [])
     notes = data.get("notes", [])
     note = m.html_text or m.text or ""
     if note:
         notes.append(note)
         await state.update_data(notes=notes)
-        await m.reply("📝 توضیح ثبت شد. در پایان روی «ثبت و ارسال برای ادمین» بزن.", reply_markup=_kb_receipt_flow())
-
-
-@router.callback_query(F.data == "topdone")
-async def topup_finalize(cb: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    if not data or data.get("amount") is None:
-        return await cb.answer("مبلغ انتخاب نشده است.", show_alert=True)
-    amount = data.get("amount")
-    photos = data.get("photos", [])
-    notes = data.get("notes", [])
-    note_txt = "\n".join(n for n in notes if n).strip()
-    pid = db_new_payment(cb.from_user.id, amount, note_txt, photos)
-    logger.info("Topup submitted uid=%s pid=%s amount=%s photos=%s note_len=%s", cb.from_user.id, pid, amount, len(photos), len(note_txt))
-    await state.clear()
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="مشاهده رسید", callback_data=f"payview:{pid}")]])
-    for aid in get_admin_ids():
-        try:
-            base_msg = (
-                f"پرداخت جدید #{pid}\n"
-                f"از <a href=\"tg://user?id={cb.from_user.id}\">{htmlesc(cb.from_user.full_name or cb.from_user.username or str(cb.from_user.id))}</a>\n"
-                f"مبلغ: {amount:,}"
-            )
-            if note_txt:
-                base_msg += f"\nتوضیحات: {htmlesc(note_txt)}"
-            await cb.bot.send_message(aid, base_msg, parse_mode=ParseMode.HTML)
-            for ph in photos:
-                await cb.bot.send_photo(aid, ph, caption=f"رسید #{pid}")
-            await cb.bot.send_message(aid, "اقدام:", reply_markup=kb)
-        except Exception:
-            continue
-    await cb.message.edit_text("درخواست شما ثبت شد و پس از بررسی ادمین نتیجه اعلام می‌شود.", reply_markup=_topup_main_keyboard(), parse_mode=ParseMode.HTML)
+        await m.reply("📝 توضیح ثبت شد. رسید را ارسال کن تا درخواست به‌صورت خودکار ثبت شود.", reply_markup=_kb_amount_selected())
 
 
 def _wallet_text(bal: int) -> str:
@@ -289,6 +281,11 @@ async def admin_pay_ok(cb: CallbackQuery):
     r = db_get_payment(pid)
     if not r:
         return await cb.answer("درخواست پیدا نشد", show_alert=True)
+    status = (r.get("status") or "").lower()
+    if status == "approved":
+        return await cb.answer("این پرداخت قبلاً تایید شده است.", show_alert=True)
+    if status == "rejected":
+        return await cb.answer("این پرداخت قبلاً رد شده است.", show_alert=True)
     db_add_wallet(r["user_id"], r["amount"])
     db_update_payment_status(pid, "approved")
     logger.info("Topup approved pid=%s uid=%s amount=%s by_admin=%s", pid, r["user_id"], r["amount"], cb.from_user.id)
