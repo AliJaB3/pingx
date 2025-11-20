@@ -16,24 +16,17 @@ def kb_main(uid: int, is_admin: bool):
 
 
 def kb_force_join(channels):
-    if isinstance(channels, str):
-        channels = [channels]
-    cleaned = []
-    for ch in channels:
-        ch = (ch or "").strip()
-        if not ch:
-            continue
-        label = ch if ch.startswith("@") else f"@{ch}"
-        cleaned.append(label)
-    rows = [
-        [
-            InlineKeyboardButton(
-                text=f"عضویت در {label}",
-                url=f"https://t.me/{label.lstrip('@')}",
-            )
-        ]
-        for label in cleaned
-    ]
+    rows = []
+    for item in channels:
+        if isinstance(item, dict):
+            label = item.get("label") or "کانال"
+            url = item.get("url")
+        else:
+            label = str(item)
+            url = f"https://t.me/{label.lstrip('@')}" if str(label).startswith("@") else None
+        button_text = f"عضویت در {label}"
+        if url:
+            rows.append([InlineKeyboardButton(text=button_text, url=url)])
     rows.append([InlineKeyboardButton(text="🔄 بررسی عضویت", callback_data="recheck_join")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

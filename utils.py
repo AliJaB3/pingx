@@ -1,4 +1,5 @@
 import html, math, secrets, re
+from typing import Any
 from datetime import datetime, timezone
 from io import BytesIO
 import qrcode
@@ -30,14 +31,21 @@ def normalize_channel_handle(ch: str) -> str:
     ch = (ch or "").strip()
     if not ch:
         return ""
-    if "t.me/" in ch.lower():
+    low = ch.lower()
+    if "t.me/" in low:
         ch = ch.split("t.me/", 1)[1]
     ch = ch.split("?")[0].strip().strip("/")
     if not ch:
         return ""
-    if not ch.startswith("@"):
-        ch = "@" + ch
-    return ch
+    if ch.startswith("-") or ch.lstrip("-").isdigit():
+        if not ch.startswith("-"):
+            ch = "-" + ch
+        if not ch.startswith("-100"):
+            ch = "-100" + ch.lstrip("-")
+        return ch
+    if ch.startswith("@"):
+        return ch
+    return "@" + ch
 
 
 def parse_channel_list(value: str) -> list[str]:
@@ -50,3 +58,32 @@ def parse_channel_list(value: str) -> list[str]:
         if ch and ch not in seen:
             seen.append(ch)
     return seen
+
+
+async def fetch_channel_details(bot: Any, channels: list[str]):
+    details = []
+    for ch in channels:
+        if not ch:
+            continue
+        chat_id: Any = ch
+        if not ch.startswith("@"):
+            try:
+                chat_id = int(ch)
+            except Exception:
+                chat_id = ch
+        label = ch.lstrip("@") if ch.startswith("@") else ch
+        url = None
+        try:
+            chat = await bot.get_chat(chat_id)
+            label = chat.title or chat.username or label
+            username = getattr(chat, "username", None)
+            invite = getattr(chat, "invite_link", None)
+            if username:
+                url = f"https://t.me/{username}"
+            elif invite:
+                url = invite
+        except Exception:
+            if ch.startswith("@"):
+                url = f"https://t.me/{ch.lstrip('@')}"
+        details.append({"id": ch, "label": label, "url": url})
+    return details

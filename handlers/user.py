@@ -29,13 +29,12 @@ from db import (
     is_admin,
 )
 from keyboards import kb_main, kb_force_join, kb_plans, kb_mysubs, kb_sub_detail
-from utils import htmlesc, progress_bar, human_bytes, qr_bytes, safe_name_from_user, parse_channel_list
+from utils import htmlesc, progress_bar, human_bytes, qr_bytes, safe_name_from_user, parse_channel_list, fetch_channel_details
 from xui import three_session
 
 TZ = timezone.utc
 router = Router()
 logger = logging.getLogger("pingx.user")
-SUBSTAT_LOCK = asyncio.Lock()
 
 
 class Topup(StatesGroup):
@@ -121,16 +120,24 @@ async def check_force_join(bot, uid: int) -> bool:
     return True
 
 
+async def _force_join_message(bot):
+    channels = _required_channels_list()
+    details = await fetch_channel_details(bot, channels)
+    lines = "\n".join(f"• {d.get('label')}" for d in details if d.get("label"))
+    text = "📢 برای استفاده از ربات لطفاً ابتدا در کانال‌های زیر عضو شوید."
+    if lines:
+        text += f"\n{lines}"
+    return text, kb_force_join(details)
+
+
 @router.message(CommandStart())
 async def start(m: Message):
     if getattr(m.chat, "type", "private") != "private":
         return
     save_or_update_user(m.from_user)
     if not await check_force_join(m.bot, m.from_user.id):
-        await m.answer(
-            "📢 برای استفاده از ربات لطفاً ابتدا در کانال‌های اعلام‌شده عضو شوید.",
-            reply_markup=kb_force_join(_required_channels_list()),
-        )
+        text, markup = await _force_join_message(m.bot)
+        await m.answer(text, reply_markup=markup)
         return
     bal = db_get_wallet(m.from_user.id)
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
@@ -395,10 +402,7 @@ async def sub_stat_refresh(cb: CallbackQuery):
         return await cb.answer("این اشتراک یافت نشد یا برای شما نیست.", show_alert=True)
     inbound_id = int(r["three_xui_inbound_id"])
     client_id = r["three_xui_client_id"]
-    if SUBSTAT_LOCK.locked():
-        return await cb.answer("در حال بررسی یک اشتراک دیگر هستیم. لطفاً چند لحظه دیگر تلاش کن.", show_alert=True)
-    async with SUBSTAT_LOCK:
-        stat = await three_session.get_client_stats(inbound_id, client_id, r["client_email"])
+    stat = await three_session.get_client_stats(inbound_id, client_id, r["client_email"])
     if not stat:
         return await cb.answer("آمار مصرفی در دسترس نیست", show_alert=True)
     total = int(stat.get("total") or 0)
@@ -418,10 +422,11 @@ async def recheck_join(cb: CallbackQuery):
         return
     channels = _required_channels_list()
     if not await check_force_join(cb.bot, cb.from_user.id):
-        await cb.message.edit_text(
-            "📢 هنوز عضو تمام کانال‌های موردنیاز نشده‌ای.",
-            reply_markup=kb_force_join(channels),
-        )
+        text, markup = await _force_join_message(cb.bot)
+        try:
+            await cb.message.edit_text(text, reply_markup=markup)
+        except Exception:
+            await cb.message.answer(text, reply_markup=markup)
         return
     bal = db_get_wallet(cb.from_user.id)
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
