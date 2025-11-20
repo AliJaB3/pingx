@@ -120,6 +120,21 @@ async def topup_select_amount(cb: CallbackQuery, state: FSMContext):
     )
 
 
+@router.callback_query(F.data == "nosend")
+async def topup_prompt_receipt(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if not data or data.get("amount") is None:
+        return await cb.answer("ابتدا مبلغ شارژ را انتخاب کن.", show_alert=True)
+    max_photos = _runtime_max_photos()
+    max_mb = _runtime_max_mb()
+    msg = (
+        "رسید/توضیحات را بفرست و در پایان «ثبت و ارسال برای ادمین» را بزن.\n"
+        f"📎 می‌توانی حداکثر {max_photos} عکس تا {max_mb}MB برای هر عکس بفرستی."
+    )
+    await cb.message.answer(msg, reply_markup=_kb_receipt_flow())
+    await cb.answer()
+
+
 @router.message(StateFilter(Topup.note), F.photo)
 async def collect_photo(m: Message, state: FSMContext):
     data = await state.get_data()
