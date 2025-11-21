@@ -353,6 +353,26 @@ def db_get_plans_for_user(is_admin: bool):
     return res
 
 
+def user_has_test_purchase(uid: int) -> bool:
+    rows = cur.execute(
+        """
+        SELECT p.plan_id, COALESCE(pl.flags, '{}') AS flags
+        FROM purchases p
+        JOIN plans pl ON pl.id = p.plan_id
+        WHERE p.user_id=?
+        """,
+        (uid,),
+    ).fetchall()
+    for r in rows:
+        try:
+            flags = json.loads(r["flags"] or "{}")
+        except Exception:
+            flags = {}
+        if flags.get("test"):
+            return True
+    return False
+
+
 def db_new_purchase(**kw):
     fields = ["user_id", "plan_id", "price", "three_xui_client_id", "three_xui_inbound_id", "client_email", "sub_id", "sub_link", "allocated_gb", "expiry_ms", "created_at", "meta"]
     cur.execute(

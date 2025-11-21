@@ -27,6 +27,7 @@ from db import (
     get_setting,
     cur,
     is_admin,
+    user_has_test_purchase,
 )
 from keyboards import kb_main, kb_force_join, kb_plans, kb_mysubs, kb_sub_detail
 from utils import htmlesc, progress_bar, human_bytes, qr_bytes, safe_name_from_user, parse_channel_list, fetch_channel_details
@@ -40,6 +41,13 @@ logger = logging.getLogger("pingx.user")
 class Topup(StatesGroup):
     amount = State()
     note = State()
+
+
+def _plan_flags(plan) -> dict:
+    try:
+        return json.loads(plan.get("flags") or "{}")
+    except Exception:
+        return {}
 
 
 async def _deliver_subscription_link(bot, uid: int, link: str):
@@ -163,8 +171,11 @@ async def home(cb: CallbackQuery):
 
 @router.callback_query(F.data == "buy")
 async def buy_menu(cb: CallbackQuery):
-    plans = db_get_plans_for_user(is_admin(cb.from_user.id))
-    await cb.message.edit_text("🎯 یکی از پلن‌های زیر را انتخاب کن:", reply_markup=kb_plans(plans, is_admin(cb.from_user.id)))
+    is_adm = is_admin(cb.from_user.id)
+    plans = db_get_plans_for_user(is_adm)
+    if user_has_test_purchase(cb.from_user.id) and not is_adm:
+        plans = [p for p in plans if not _plan_flags(p).get("test")]
+    await cb.message.edit_text("🎯 یکی از پلن‌های زیر را انتخاب کن:", reply_markup=kb_plans(plans, is_adm))
 
 
 @router.callback_query(F.data.startswith("plan:"))
@@ -173,6 +184,9 @@ async def plan_select(cb: CallbackQuery):
     plan = db_get_plan(pid)
     if not plan:
         return await cb.answer("پلن پیدا نشد")
+    flags = _plan_flags(plan)
+    if flags.get("test") and not is_admin(cb.from_user.id) and user_has_test_purchase(cb.from_user.id):
+        return await cb.answer("شما قبلا پلن آزمایشی دریافت کرده‌ای.", show_alert=True)
     price = int(plan["price"])
     bal = db_get_wallet(cb.from_user.id)
     if bal < price:
@@ -209,6 +223,9 @@ async def buy_confirm(cb: CallbackQuery):
     plan = db_get_plan(pid)
     if not plan:
         return await cb.answer("پلن پیدا نشد")
+    flags = _plan_flags(plan)
+    if flags.get("test") and not is_admin(cb.from_user.id) and user_has_test_purchase(cb.from_user.id):
+        return await cb.answer("شما قبلا پلن آزمایشی دریافت کرده‌ای.", show_alert=True)
     price = int(plan["price"])
     if not try_deduct_wallet(cb.from_user.id, price):
         logger.warning("Buy failed insufficient wallet uid=%s plan=%s price=%s", cb.from_user.id, pid, price)
@@ -225,11 +242,6 @@ async def buy_confirm(cb: CallbackQuery):
     uniq = secrets.token_hex(2)
     email = f"{name_part}-{plan_slug}-{uniq}@{domain_part}"
     remark = f"{(cb.from_user.full_name or cb.from_user.username or cb.from_user.id)} | {plan['title']} | {cb.from_user.id}"
-    flags = {}
-    try:
-        flags = json.loads(plan.get("flags") or "{}")
-    except Exception:
-        flags = {}
     device_limit = int(flags.get("device_limit") or 0)
     try:
         added = await three_session.add_client(
@@ -365,24 +377,45 @@ async def sub_revoke(cb: CallbackQuery):
         inbound_id = int(r["three_xui_inbound_id"])
         client_id = r["three_xui_client_id"]
         client_email = r["client_email"] if "client_email" in r.keys() else None
+        sub_id = r["sub_id"] if "sub_id" in r.keys() else None
+
+        def _match_client(clients):
+            cid_norm = str(client_id or "").replace("-", "")
+            sub_norm = str(sub_id or "").replace("-", "")
+            for c in clients or []:
+                cid = str(c.get("id") or "").replace("-", "")
+                if cid_norm and cid == cid_norm:
+                    return c
+                if client_email and c.get("email") == client_email:
+                    return c
+                if sub_norm and str(c.get("subId") or "").replace("-", "") == sub_norm:
+                    return c
+            return None
+
         # Fetch full payload to avoid wiping other fields on update
         inbound = await three_session.get_inbound(inbound_id)
         payload = None
+        clients = []
         if inbound:
             try:
                 s = inbound.get("settings")
                 s = json.loads(s) if isinstance(s, str) else (s or {})
-                payload = next(
-                    (c for c in (s.get("clients") or []) if str(c.get("id")).replace("-", "") == str(client_id).replace("-", "")),
-                    None,
-                )
+                clients = s.get("clients") or []
+                payload = _match_client(clients)
             except Exception:
+                clients = []
                 payload = None
         if not payload and client_email:
             payload = await three_session.get_client_stats(inbound_id, client_id, client_email)
         if not payload:
+            payload = _match_client(clients)
+        if not payload:
+            logger.warning("subrevoke: client not found pid=%s uid=%s inbound=%s", pid, cb.from_user.id, inbound_id)
             return await cb.answer("کلاینت پیدا نشد.", show_alert=True)
         real_id = payload.get("id") or client_id
+        if not real_id:
+            logger.warning("subrevoke: missing client id pid=%s uid=%s inbound=%s", pid, cb.from_user.id, inbound_id)
+            return await cb.answer("شناسه کاربر در پنل پیدا نشد.", show_alert=True)
         payload = dict(payload)
         payload["enable"] = False
         await three_session.update_client(inbound_id, real_id, payload)
