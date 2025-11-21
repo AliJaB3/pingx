@@ -354,11 +354,15 @@ def db_get_plans_for_user(is_admin: bool):
 
 
 def user_has_test_purchase(uid: int) -> bool:
+    """
+    Detect if user has ever received a test plan.
+    Uses LEFT JOIN so even deleted plans are considered, and also inspects purchase.meta.
+    """
     rows = cur.execute(
         """
-        SELECT p.plan_id, COALESCE(pl.flags, '{}') AS flags
+        SELECT p.plan_id, p.meta, COALESCE(pl.flags, '{}') AS flags
         FROM purchases p
-        JOIN plans pl ON pl.id = p.plan_id
+        LEFT JOIN plans pl ON pl.id = p.plan_id
         WHERE p.user_id=?
         """,
         (uid,),
@@ -370,6 +374,15 @@ def user_has_test_purchase(uid: int) -> bool:
             flags = {}
         if flags.get("test"):
             return True
+        meta = r["meta"]
+        if meta:
+            try:
+                m = json.loads(meta)
+                if isinstance(m, dict) and m.get("test"):
+                    return True
+            except Exception:
+                if str(meta).lower() == "test":
+                    return True
     return False
 
 

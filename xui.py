@@ -276,6 +276,41 @@ class ThreeXUISession:
                 return last
             except Exception as e:
                 last = e
+        # Fallback: update entire inbound settings if direct endpoint fails or missing id support
+        try:
+            inbound = await self.get_inbound(inbound_id)
+            if inbound:
+                s = inbound.get("settings")
+                s = json.loads(s) if isinstance(s, str) else (s or {})
+                clients = list(s.get("clients") or [])
+                replaced = False
+                cid_norm = str(client_id or "").replace("-", "")
+                target_email = client_payload.get("email")
+                target_sub = str(client_payload.get("subId") or "").replace("-", "")
+                for idx, c in enumerate(clients):
+                    cur_id = str(c.get("id") or "").replace("-", "")
+                    cur_sub = str(c.get("subId") or "").replace("-", "")
+                    if cid_norm and cur_id == cid_norm:
+                        clients[idx] = client_payload
+                        replaced = True
+                        break
+                    if target_email and c.get("email") == target_email:
+                        clients[idx] = client_payload
+                        replaced = True
+                        break
+                    if target_sub and cur_sub == target_sub:
+                        clients[idx] = client_payload
+                        replaced = True
+                        break
+                if replaced:
+                    s["clients"] = clients
+                    return await self.request(
+                        "POST",
+                        f"/panel/api/inbounds/update/{int(inbound_id)}",
+                        json_data={"id": int(inbound_id), "settings": json.dumps(s, ensure_ascii=False)},
+                    )
+        except Exception as e:
+            last = e
         raise ThreeXUIError(f"updateClient failed: {last}")
 
     async def rotate_subid(self, inbound_id: int, client_id: str, email: str | None = None) -> str:

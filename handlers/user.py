@@ -243,6 +243,7 @@ async def buy_confirm(cb: CallbackQuery):
     email = f"{name_part}-{plan_slug}-{uniq}@{domain_part}"
     remark = f"{(cb.from_user.full_name or cb.from_user.username or cb.from_user.id)} | {plan['title']} | {cb.from_user.id}"
     device_limit = int(flags.get("device_limit") or 0)
+    meta_value = "test" if flags.get("test") else None
     try:
         added = await three_session.add_client(
             inbound_id,
@@ -278,7 +279,7 @@ async def buy_confirm(cb: CallbackQuery):
         sub_link=sub_link,
         allocated_gb=allocated_gb,
         expiry_ms=expiry_ms,
-        meta=None,
+        meta=meta_value,
     )
     try:
         await _deliver_subscription_link(cb.bot, cb.from_user.id, sub_link)
