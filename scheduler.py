@@ -25,10 +25,7 @@ async def scheduler(bot: Bot):
                         last_usage_warn = (cached["last_usage_warn"] or "").strip() if "last_usage_warn" in cached.keys() else ""
                         if 0.80 <= pct < 0.83 and last_usage_warn != "80":
                             try:
-                                await bot.send_message(
-                                    uid,
-                                    f"�???�??�???? �???�??�??�???�??? �???�???�??? �???�??? {int(pct*100)}�??? �???�??�?? �???�???�??? �???�???�???�??? �???�???�???�???�??? �???�???�???.",
-                                )
+                                await bot.send_message(uid, f"⚠️ مصرف شما به {int(pct*100)}٪ رسیده است.")
                                 cur.execute("UPDATE cache_usage SET last_usage_warn=? WHERE purchase_id=?", ("80", pid))
                             except Exception:
                                 pass
@@ -50,10 +47,7 @@ async def scheduler(bot: Bot):
                             recent = False
                     if days_left > 0 and days_left in (3, 1) and last_exp_notice != days_left and not recent:
                         try:
-                            await bot.send_message(
-                                uid,
-                                f"�???�?? �???�???�???�???�???�??? �???�???�??? �???�??? {days_left} �???�???�??�?? �???�???�???�??? �???�???�???�???�??? �???�???�????�???�???�???.",
-                            )
+                            await bot.send_message(uid, f"📢 اشتراک شما {days_left} روز دیگر منقضی می‌شود.")
                             cur.execute(
                                 "UPDATE purchases SET last_expiry_notice=?, last_expiry_notice_at=? WHERE id=?",
                                 (days_left, datetime.now(TZ).isoformat(), pid),

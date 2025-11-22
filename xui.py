@@ -305,20 +305,24 @@ class ThreeXUISession:
         raise ThreeXUIError(f"addClient failed on all endpoints: last_err={last_err}, last_resp={last_resp}")
 
     async def update_client(self, inbound_id: int, client_id: str, client_payload: dict):
-        paths = [
-            f"/panel/api/inbounds/updateClient/{client_id}",
-            f"/panel/api/inbounds/{int(inbound_id)}/updateClient/{client_id}",
-            f"/api/inbounds/updateClient/{client_id}",
-            f"/xui/inbound/updateClient/{client_id}",
+        attempts = [
+            ("POST", f"/panel/api/inbounds/updateClient/{client_id}", {"id": int(inbound_id), "client": client_payload}, None, None),
+            ("POST", f"/panel/api/inbounds/updateClient/{client_id}", None, {"id": int(inbound_id), "client": json.dumps(client_payload, ensure_ascii=False)}, {"Content-Type": "application/x-www-form-urlencoded"}),
+            ("POST", f"/panel/api/inbounds/{int(inbound_id)}/updateClient/{client_id}", {"id": int(inbound_id), "client": client_payload}, None, None),
+            ("POST", f"/api/inbounds/updateClient/{client_id}", {"id": int(inbound_id), "client": client_payload}, None, None),
+            ("POST", f"/xui/inbound/updateClient/{client_id}", {"id": int(inbound_id), "client": client_payload}, None, None),
         ]
-        body = {"id": int(inbound_id), "client": json.dumps(client_payload, ensure_ascii=False)}
         last = None
-        for p in paths:
+        for method, path, json_body, data_body, headers in attempts:
             try:
-                last = await self.request("POST", p, json_data=body)
-                return last
+                resp = await self.request(method, path, json_data=json_body, data=data_body, headers=headers)
+                last = resp
+                if isinstance(resp, dict) and resp.get("success") is False:
+                    continue
+                return resp
             except Exception as e:
                 last = e
+        # Fallback: edit settings in-memory and push with update inbound, preserving existing fields
         try:
             inbound = await self.get_inbound(inbound_id)
             if inbound:
@@ -346,11 +350,8 @@ class ThreeXUISession:
                         break
                 if replaced:
                     s["clients"] = clients
-                    return await self.request(
-                        "POST",
-                        f"/panel/api/inbounds/update/{int(inbound_id)}",
-                        json_data={"id": int(inbound_id), "settings": json.dumps(s, ensure_ascii=False)},
-                    )
+                    payload = {"id": int(inbound_id), "settings": json.dumps(s, ensure_ascii=False)}
+                    return await self.request("POST", f"/panel/api/inbounds/update/{int(inbound_id)}", json_data=payload)
         except Exception as e:
             last = e
         raise ThreeXUIError(f"updateClient failed: {last}")
