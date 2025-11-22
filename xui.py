@@ -305,12 +305,28 @@ class ThreeXUISession:
         raise ThreeXUIError(f"addClient failed on all endpoints: last_err={last_err}, last_resp={last_resp}")
 
     async def update_client(self, inbound_id: int, client_id: str, client_payload: dict):
+        payload_str = json.dumps(client_payload, ensure_ascii=False)
         attempts = [
+            # JSON body with client as string
+            ("POST", f"/panel/api/inbounds/updateClient/{client_id}", {"id": int(inbound_id), "client": payload_str}, None, None),
+            # Form body with client string
+            ("POST", f"/panel/api/inbounds/updateClient/{client_id}", None, {"id": int(inbound_id), "client": payload_str}, {"Content-Type": "application/x-www-form-urlencoded"}),
+            # JSON body with client as raw dict
             ("POST", f"/panel/api/inbounds/updateClient/{client_id}", {"id": int(inbound_id), "client": client_payload}, None, None),
-            ("POST", f"/panel/api/inbounds/updateClient/{client_id}", None, {"id": int(inbound_id), "client": json.dumps(client_payload, ensure_ascii=False)}, {"Content-Type": "application/x-www-form-urlencoded"}),
-            ("POST", f"/panel/api/inbounds/{int(inbound_id)}/updateClient/{client_id}", {"id": int(inbound_id), "client": client_payload}, None, None),
-            ("POST", f"/api/inbounds/updateClient/{client_id}", {"id": int(inbound_id), "client": client_payload}, None, None),
-            ("POST", f"/xui/inbound/updateClient/{client_id}", {"id": int(inbound_id), "client": client_payload}, None, None),
+            # Alternate path with json body
+            ("POST", f"/panel/api/inbounds/{int(inbound_id)}/updateClient/{client_id}", {"id": int(inbound_id), "client": payload_str}, None, None),
+            # API prefixed path
+            ("POST", f"/api/inbounds/updateClient/{client_id}", {"id": int(inbound_id), "client": payload_str}, None, None),
+            # xui prefixed path
+            ("POST", f"/xui/inbound/updateClient/{client_id}", {"id": int(inbound_id), "client": payload_str}, None, None),
+            # settings-based update (single client) via panel api
+            (
+                "POST",
+                f"/panel/api/inbounds/updateClient/{client_id}",
+                {"id": int(inbound_id), "settings": json.dumps({"clients": [client_payload]}, ensure_ascii=False)},
+                None,
+                None,
+            ),
         ]
         last = None
         for method, path, json_body, data_body, headers in attempts:
@@ -322,7 +338,38 @@ class ThreeXUISession:
                 return resp
             except Exception as e:
                 last = e
-        # No safe fallback; avoid corrupting inbound by posting incomplete payloads
+        # Fallback: read full inbound settings, replace target client, push back
+        try:
+            inbound = await self.get_inbound(inbound_id)
+            if inbound:
+                s = inbound.get("settings")
+                s = json.loads(s) if isinstance(s, str) else (s or {})
+                clients = list(s.get("clients") or [])
+                replaced = False
+                cid_norm = str(client_id or "").replace("-", "")
+                target_email = client_payload.get("email")
+                target_sub = str(client_payload.get("subId") or "").replace("-", "")
+                for idx, c in enumerate(clients):
+                    cur_id = str(c.get("id") or "").replace("-", "")
+                    cur_sub = str(c.get("subId") or "").replace("-", "")
+                    if cid_norm and cur_id == cid_norm:
+                        clients[idx] = client_payload
+                        replaced = True
+                        break
+                    if target_email and c.get("email") == target_email:
+                        clients[idx] = client_payload
+                        replaced = True
+                        break
+                    if target_sub and cur_sub == target_sub:
+                        clients[idx] = client_payload
+                        replaced = True
+                        break
+                if replaced:
+                    s["clients"] = clients
+                    payload = {"id": int(inbound_id), "settings": json.dumps(s, ensure_ascii=False)}
+                    return await self.request("POST", f"/panel/api/inbounds/update/{int(inbound_id)}", json_data=payload)
+        except Exception as e:
+            last = e
         raise ThreeXUIError(f"updateClient failed: {last}")
 
     async def rotate_subid(self, inbound_id: int, client_id: str, email: str | None = None) -> str:

@@ -12,6 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import StateFilter
+from aiogram.exceptions import TelegramBadRequest
 
 from config import THREEXUI_INBOUND_ID, SUB_PATH, SUB_PORT, SUB_SCHEME, SUB_HOST, REQUIRED_CHANNEL
 from db import (
@@ -356,12 +357,19 @@ async def sub_fix_link(cb: CallbackQuery):
     try:
         link = await _resolve_subscription_link(dict(r), mode="rotate")
         await _deliver_subscription_link(cb.bot, cb.from_user.id, link)
-        await cb.answer("لینک جدید صادر شد.")
+        try:
+            await cb.answer("لینک جدید صادر شد.")
+        except TelegramBadRequest:
+            # callback timed out; ارسال پیام معمولی
+            await cb.message.answer("لینک جدید صادر شد.")
     except RuntimeError:
         return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
     except Exception:
         logger.exception("rotate_subid failed pid=%s uid=%s", pid, cb.from_user.id)
-        await cb.answer("ارسال لینک با خطا مواجه شد.", show_alert=True)
+        try:
+            await cb.answer("ارسال لینک با خطا مواجه شد.", show_alert=True)
+        except TelegramBadRequest:
+            await cb.message.answer("ارسال لینک با خطا مواجه شد.")
 
 
 @router.callback_query(F.data.startswith("sublink:"))
