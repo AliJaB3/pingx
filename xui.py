@@ -2,10 +2,12 @@ import json
 import secrets
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone
+import logging
 import httpx
 from config import THREEXUI_BASE_URL, THREEXUI_USERNAME, THREEXUI_PASSWORD
 
 TZ = timezone.utc
+logger = logging.getLogger("pingx.xui")
 
 
 class ThreeXUIError(RuntimeError):
@@ -26,6 +28,21 @@ class ThreeXUISession:
         self.password = password
         self.client: httpx.AsyncClient | None = None
         self._logged_in = False
+
+    def _sanitize(self, obj):
+        if obj is None:
+            return None
+        if isinstance(obj, dict):
+            res = {}
+            for k, v in obj.items():
+                if str(k).lower() in ("password", "pass", "authorization"):
+                    res[k] = "***"
+                else:
+                    res[k] = self._sanitize(v)
+            return res
+        if isinstance(obj, (list, tuple)):
+            return [self._sanitize(x) for x in obj]
+        return obj
 
     def _create_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(base_url=self.base, timeout=20.0, follow_redirects=True)
@@ -74,11 +91,16 @@ class ThreeXUISession:
 
     async def request(self, method: str, path: str, json_data=None, params=None, data=None, headers=None):
         await self._ensure()
+        safe_json = self._sanitize(json_data)
+        safe_data = self._sanitize(data)
+        safe_headers = self._sanitize(headers)
+        logger.info("3xui request %s %s json=%s params=%s data=%s headers=%s", method, path, safe_json, params, safe_data, safe_headers)
         r = await self.client.request(method, path, json=json_data, params=params, data=data, headers=headers)
         if r.status_code == 401:
             self._logged_in = False
             await self._login()
             r = await self.client.request(method, path, json=json_data, params=params, data=data, headers=headers)
+        logger.info("3xui response %s %s status=%s body=%s", method, path, r.status_code, (r.text[:500] if r.text else ""))
         r.raise_for_status()
         try:
             return r.json()

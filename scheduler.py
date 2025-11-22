@@ -27,7 +27,7 @@ async def scheduler(bot: Bot):
                             try:
                                 await bot.send_message(
                                     uid,
-                                    f"�?��?? �?���?�? �?�?�? �?�? {int(pct*100)}�? �?�� �?�?�? �?�?�?�? �?�?�?�?�? �?�?�?.",
+                                    f"�???�??�???? �???�??�??�???�??? �???�???�??? �???�??? {int(pct*100)}�??? �???�??�?? �???�???�??? �???�???�???�??? �???�???�???�???�??? �???�???�???.",
                                 )
                                 cur.execute("UPDATE cache_usage SET last_usage_warn=? WHERE purchase_id=?", ("80", pid))
                             except Exception:
@@ -36,14 +36,28 @@ async def scheduler(bot: Bot):
                 expiry_ms = int(r["expiry_ms"] or 0)
                 if expiry_ms > 0:
                     days_left = math.ceil((expiry_ms - now_ms) / 1000 / 3600 / 24)
-                    last_exp_notice = r.get("last_expiry_notice")
-                    if days_left > 0 and days_left in (3, 1) and last_exp_notice != days_left:
+                    try:
+                        last_exp_notice = int(r.get("last_expiry_notice"))
+                    except Exception:
+                        last_exp_notice = None
+                    last_at = r.get("last_expiry_notice_at")
+                    recent = False
+                    if last_at:
+                        try:
+                            last_dt = datetime.fromisoformat(last_at)
+                            recent = (datetime.now(TZ) - last_dt).total_seconds() < 86_400
+                        except Exception:
+                            recent = False
+                    if days_left > 0 and days_left in (3, 1) and last_exp_notice != days_left and not recent:
                         try:
                             await bot.send_message(
                                 uid,
-                                f"�?� �?�?�?�?�?�? �?�?�? �?�? {days_left} �?�?�� �?�?�?�? �?�?�?�?�? �?�?�??�?�?�?.",
+                                f"�???�?? �???�???�???�???�???�??? �???�???�??? �???�??? {days_left} �???�???�??�?? �???�???�???�??? �???�???�???�???�??? �???�???�????�???�???�???.",
                             )
-                            cur.execute("UPDATE purchases SET last_expiry_notice=? WHERE id=?", (days_left, pid))
+                            cur.execute(
+                                "UPDATE purchases SET last_expiry_notice=?, last_expiry_notice_at=? WHERE id=?",
+                                (days_left, datetime.now(TZ).isoformat(), pid),
+                            )
                         except Exception:
                             pass
         except Exception:

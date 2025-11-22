@@ -3,6 +3,7 @@ import logging
 import re
 import secrets
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from aiogram import Router, F
 from aiogram.enums import ParseMode, ChatMemberStatus
@@ -98,23 +99,27 @@ async def _resolve_subscription_link(row, mode: str = "panel") -> str:
 
 
 def build_subscribe_url(sub_id: str) -> str:
-    host = (get_setting("SUB_HOST", SUB_HOST) or "").strip()
-    if not host:
-        host = (three_session and three_session.base.split("://")[-1].split(":")[0]) or "localhost"
-    host = re.sub(r"^https?://", "", host, flags=re.IGNORECASE).strip("/")
+    host_cfg = (get_setting("SUB_HOST", SUB_HOST) or "").strip()
     scheme = (get_setting("SUB_SCHEME", SUB_SCHEME) or SUB_SCHEME or "https").strip() or "https"
     path = (get_setting("SUB_PATH", SUB_PATH) or SUB_PATH or "/").strip() or "/"
     if not path.startswith("/"):
         path = "/" + path
     if not path.endswith("/"):
         path += "/"
+    base = three_session.base if (three_session and getattr(three_session, "base", None)) else ""
+    parsed_base = urlparse(base) if base else None
+    host = host_cfg or (parsed_base.hostname if parsed_base else "localhost")
+    host = re.sub(r"^https?://", "", host, flags=re.IGNORECASE).strip("/")
     port_raw = str(get_setting("SUB_PORT", str(SUB_PORT)) or "").strip()
+    port = None
     try:
-        port = int(port_raw)
+        port_val = int(port_raw)
+        if port_val > 0:
+            port = port_val
     except Exception:
-        port = SUB_PORT
-    if port <= 0:
-        port = SUB_PORT
+        port = None
+    if port is None:
+        port = parsed_base.port if parsed_base and parsed_base.port else SUB_PORT
     return f"{scheme}://{host}:{port}{path}{sub_id}"
 
 
@@ -427,18 +432,16 @@ async def sub_revoke(cb: CallbackQuery):
         if not real_id:
             logger.warning("subrevoke: missing client id pid=%s uid=%s inbound=%s", pid, cb.from_user.id, inbound_id)
             return await cb.answer("شناسه کاربر در پنل پیدا نشد.", show_alert=True)
-        latest_sub = payload.get("subId") or sub_id
+        # Rotate subId to invalidate قبلی و برگرداندن لینک جدید
+        new_sub = await three_session.rotate_subid(inbound_id, real_id, email=client_email)
         latest_expiry = int(payload.get("expiryTime") or r.get("expiry_ms") or 0)
-        if latest_sub:
-            cur.execute(
-                "UPDATE purchases SET sub_id=?, sub_link=?, expiry_ms=? WHERE id=?",
-                (latest_sub, build_subscribe_url(latest_sub), latest_expiry, pid),
-            )
-        payload = dict(payload)
-        payload["enable"] = False
-        await three_session.update_client(inbound_id, real_id, payload)
-        cur.execute("UPDATE purchases SET meta=? WHERE id=?", ("revoked", pid))
-        await cb.message.edit_text("🚫 اشتراک غیرفعال شد.", reply_markup=kb_mysubs(user_purchases(cb.from_user.id)))
+        new_link = build_subscribe_url(new_sub)
+        cur.execute(
+            "UPDATE purchases SET sub_id=?, sub_link=?, expiry_ms=? WHERE id=?",
+            (new_sub, new_link, latest_expiry, pid),
+        )
+        await _deliver_subscription_link(cb.bot, cb.from_user.id, new_link)
+        await cb.message.edit_text("✅ لینک جدید ارسال شد.", reply_markup=kb_mysubs(user_purchases(cb.from_user.id)))
     except Exception as e:
         await cb.answer(f"خطا: {e}", show_alert=True)
 

@@ -83,6 +83,7 @@ def migrate():
     add_col("purchases", "created_at", "TEXT")
     add_col("purchases", "meta", "TEXT")
     add_col("purchases", "last_expiry_notice", "INTEGER")
+    add_col("purchases", "last_expiry_notice_at", "TEXT")
 
     cur.execute(
         """
