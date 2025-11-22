@@ -15,10 +15,11 @@ from db import (
     store_tmsg,
     list_tickets_page,
     list_ticket_messages_page,
+    find_ticket_by_msg_id,
     cur,
 )
 from utils import htmlesc
-from config import PAGE_SIZE_TICKETS
+from config import PAGE_SIZE_TICKETS, TICKET_GROUP_ID
 
 router = Router()
 
@@ -59,7 +60,10 @@ async def _forward_user_ticket_message(m: Message, tid: int):
         f"<a href=\"tg://user?id={m.from_user.id}\">{htmlesc(m.from_user.full_name or m.from_user.username or str(m.from_user.id))}</a>"
     )
     kb = kb_admin_reply(tid)
-    for aid in get_admin_ids():
+    recipients = list(get_admin_ids())
+    if TICKET_GROUP_ID:
+        recipients.append(TICKET_GROUP_ID)
+    for aid in recipients:
         try:
             if m.photo:
                 sent = await m.bot.send_photo(aid, m.photo[-1].file_id, caption=header, reply_markup=kb, parse_mode=ParseMode.HTML)
@@ -91,7 +95,10 @@ async def user_support(cb: CallbackQuery, state: FSMContext):
     tid = get_or_open_ticket(cb.from_user.id)
     await state.set_state(UserTicket.waiting_first)
     await state.update_data(tid=tid)
-    for aid in get_admin_ids():
+    recipients = list(get_admin_ids())
+    if TICKET_GROUP_ID:
+        recipients.append(TICKET_GROUP_ID)
+    for aid in recipients:
         try:
             await cb.bot.send_message(
                 aid,
@@ -301,3 +308,43 @@ async def admin_reply_dispatch(m: Message, state: FSMContext):
     except Exception:
         await m.reply("ارسال پیام به کاربر با خطا مواجه شد.")
     await state.clear()
+
+
+@router.message(F.chat.type.in_({"group", "supergroup"}))
+async def group_ticket_reply(m: Message):
+    # پاسخ از گروه پشتیبانی با ریپلای به پیام فوروارد شده‌ی تیکت
+    if not TICKET_GROUP_ID or int(m.chat.id) != int(TICKET_GROUP_ID):
+        return
+    if not m.reply_to_message:
+        return
+    tid = find_ticket_by_msg_id(m.reply_to_message.message_id)
+    if not tid:
+        return
+    row = cur.execute("SELECT user_id FROM tickets WHERE id=?", (tid,)).fetchone()
+    if not row:
+        return
+    uid = row["user_id"]
+    ticket_set_activity(tid)
+    prefix = f"پاسخ پشتیبانی به تیکت #{tid}:"
+    try:
+        if m.photo:
+            sent = await m.bot.send_photo(uid, m.photo[-1].file_id, caption=f"{prefix}\n{m.caption or ''}")
+            store_tmsg(tid, "admin", m.from_user.id, "photo", m.photo[-1].file_id, m.caption or "", sent.message_id)
+        elif m.document:
+            sent = await m.bot.send_document(uid, m.document.file_id, caption=f"{prefix}\n{m.caption or ''}")
+            store_tmsg(tid, "admin", m.from_user.id, "document", m.document.file_id, m.caption or "", sent.message_id)
+        elif m.voice:
+            sent = await m.bot.send_voice(uid, m.voice.file_id, caption=prefix)
+            store_tmsg(tid, "admin", m.from_user.id, "voice", m.voice.file_id, None, sent.message_id)
+        elif m.video:
+            sent = await m.bot.send_video(uid, m.video.file_id, caption=f"{prefix}\n{m.caption or ''}")
+            store_tmsg(tid, "admin", m.from_user.id, "video", m.video.file_id, m.caption or "", sent.message_id)
+        elif m.sticker:
+            sent = await m.bot.send_sticker(uid, m.sticker.file_id)
+            store_tmsg(tid, "admin", m.from_user.id, "sticker", m.sticker.file_id, None, sent.message_id)
+        else:
+            text = m.text or m.caption or ""
+            sent = await m.bot.send_message(uid, f"{prefix}\n{text}")
+            store_tmsg(tid, "admin", m.from_user.id, "text", text, None, sent.message_id)
+    except Exception:
+        pass

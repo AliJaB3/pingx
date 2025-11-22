@@ -514,3 +514,8 @@ def list_ticket_messages_page(tid: int, page: int, size: int):
     ]
     total = cur.execute("SELECT COUNT(1) FROM ticket_messages WHERE ticket_id=?", (tid,)).fetchone()[0]
     return rows, total
+
+
+def find_ticket_by_msg_id(tg_msg_id: int):
+    r = cur.execute("SELECT ticket_id FROM ticket_messages WHERE tg_msg_id=?", (tg_msg_id,)).fetchone()
+    return r["ticket_id"] if r else None
