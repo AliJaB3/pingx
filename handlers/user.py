@@ -63,7 +63,14 @@ async def _deliver_subscription_link(bot, uid: int, link: str):
     )
 
 
-async def _resolve_subscription_link(row, mode: str = "local") -> str:
+async def _resolve_subscription_link(row, mode: str = "panel") -> str:
+    """
+    Resolve a subscription link, optionally refreshing from panel or rotating subId.
+    mode:
+      - panel (default): fetch from panel if possible
+      - local: use cached link if present, otherwise panel
+      - rotate: rotate subId on panel and update DB
+    """
     link = row.get("sub_link")
     if mode == "local" and link:
         return link
@@ -73,17 +80,20 @@ async def _resolve_subscription_link(row, mode: str = "local") -> str:
     client_id = row["three_xui_client_id"]
     client_email = row["client_email"] if "client_email" in row.keys() else None
     sub_id = row.get("sub_id")
+    expiry_ms = int(row.get("expiry_ms") or 0)
+    current = None
     if mode != "rotate":
         try:
-            curr = await three_session.get_client_stats(inbound_id, client_id, client_email)
+            current = await three_session.get_client_stats(inbound_id, client_id, client_email)
         except Exception:
-            curr = None
-        if curr:
-            sub_id = curr.get("subId") or sub_id
+            current = None
+        if current:
+            sub_id = current.get("subId") or sub_id
+            expiry_ms = int(current.get("expiryTime") or expiry_ms or 0)
     if mode == "rotate" or not sub_id:
         sub_id = await three_session.rotate_subid(inbound_id, client_id, email=client_email)
     link = build_subscribe_url(sub_id)
-    cur.execute("UPDATE purchases SET sub_id=?, sub_link=? WHERE id=?", (sub_id, link, row["id"]))
+    cur.execute("UPDATE purchases SET sub_id=?, sub_link=?, expiry_ms=? WHERE id=?", (sub_id, link, expiry_ms, row["id"]))
     return link
 
 
@@ -356,7 +366,7 @@ async def sub_show_link(cb: CallbackQuery):
     if not r or r["user_id"] != cb.from_user.id:
         return await cb.answer("این اشتراک یافت نشد یا برای شما نیست.", show_alert=True)
     try:
-        link = await _resolve_subscription_link(dict(r), mode="local")
+        link = await _resolve_subscription_link(dict(r), mode="panel")
         await _deliver_subscription_link(cb.bot, cb.from_user.id, link)
         await cb.answer("لینک برای شما ارسال شد.")
     except RuntimeError:
@@ -417,6 +427,13 @@ async def sub_revoke(cb: CallbackQuery):
         if not real_id:
             logger.warning("subrevoke: missing client id pid=%s uid=%s inbound=%s", pid, cb.from_user.id, inbound_id)
             return await cb.answer("شناسه کاربر در پنل پیدا نشد.", show_alert=True)
+        latest_sub = payload.get("subId") or sub_id
+        latest_expiry = int(payload.get("expiryTime") or r.get("expiry_ms") or 0)
+        if latest_sub:
+            cur.execute(
+                "UPDATE purchases SET sub_id=?, sub_link=?, expiry_ms=? WHERE id=?",
+                (latest_sub, build_subscribe_url(latest_sub), latest_expiry, pid),
+            )
         payload = dict(payload)
         payload["enable"] = False
         await three_session.update_client(inbound_id, real_id, payload)
