@@ -138,6 +138,20 @@ def migrate():
     );"""
     )
 
+    # Referral codes for tracking user acquisition
+    cur.execute(
+        """
+    CREATE TABLE IF NOT EXISTS referral_links(
+        code TEXT PRIMARY KEY,
+        title TEXT,
+        created_by INTEGER,
+        created_at TEXT,
+        clicks INTEGER DEFAULT 0,
+        signups INTEGER DEFAULT 0
+    );
+    """
+    )
+
 
 def set_setting(k, v):
     cur.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (k, v))
@@ -254,6 +268,26 @@ def ensure_default_plans():
 
 def log_evt(actor_id: int, action: str, meta: dict):
     cur.execute("INSERT INTO audit_logs(ts,actor_id,action,meta) VALUES(?,?,?,?)", (now_iso(), actor_id, action, json.dumps(meta, ensure_ascii=False)))
+
+
+# Referral helpers
+def create_referral(code: str, title: str, created_by: int):
+    cur.execute(
+        "INSERT INTO referral_links(code,title,created_by,created_at,clicks,signups) VALUES(?,?,?,?,0,0)",
+        (code, title, int(created_by), now_iso()),
+    )
+
+
+def list_referrals():
+    return [dict(r) for r in cur.execute("SELECT * FROM referral_links ORDER BY created_at DESC").fetchall()]
+
+
+def inc_referral_click(code: str):
+    cur.execute("UPDATE referral_links SET clicks=clicks+1 WHERE code=?", (code,))
+
+
+def inc_referral_signup(code: str):
+    cur.execute("UPDATE referral_links SET signups=signups+1 WHERE code=?", (code,))
 
 
 def save_or_update_user(u):

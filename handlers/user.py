@@ -30,6 +30,8 @@ from db import (
     cur,
     is_admin,
     user_has_test_purchase,
+    inc_referral_click,
+    inc_referral_signup,
 )
 from keyboards import kb_main, kb_force_join, kb_plans, kb_mysubs, kb_sub_detail
 from utils import htmlesc, progress_bar, human_bytes, qr_bytes, safe_name_from_user, parse_channel_list, fetch_channel_details
@@ -158,7 +160,19 @@ async def _force_join_message(bot):
 async def start(m: Message):
     if getattr(m.chat, "type", "private") != "private":
         return
+    # referral tracking
+    raw_text = m.text or ""
+    parts = raw_text.split(maxsplit=1)
+    ref_param = parts[1].strip() if len(parts) > 1 else ""
+    ref_code = None
+    if ref_param:
+        ref_code = ref_param.replace("ref-", "", 1) if ref_param.startswith("ref-") else ref_param
+        if ref_code:
+            inc_referral_click(ref_code)
+    existed = cur.execute("SELECT 1 FROM users WHERE user_id=?", (m.from_user.id,)).fetchone() is not None
     save_or_update_user(m.from_user)
+    if ref_code and not existed:
+        inc_referral_signup(ref_code)
     if not await check_force_join(m.bot, m.from_user.id):
         text, markup = await _force_join_message(m.bot)
         await m.answer(text, reply_markup=markup)

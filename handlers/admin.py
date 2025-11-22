@@ -15,6 +15,7 @@ from db import (
     user_purchases, cache_get_usage,
     db_get_wallet, db_add_wallet, log_evt,
     db_list_plans, db_insert_plan, db_update_plan_field, db_delete_plan,
+    create_referral, list_referrals,
 )
 from utils import htmlesc, human_bytes, parse_channel_list
 from xui import three_session
@@ -36,11 +37,56 @@ SETTINGS_META = {
 }
 
 
+def _generate_ref_code():
+    import secrets
+
+    while True:
+        code = secrets.token_hex(4)
+        if not cur.execute("SELECT 1 FROM referral_links WHERE code=?", (code,)).fetchone():
+            return code
+
+
+def kb_admin_refs(rows):
+    kb = []
+    for r in rows[:10]:
+        code = r["code"]
+        kb.append([InlineKeyboardButton(text=f"{r['title'] or code} | کلیک {r['clicks']} | ثبت {r['signups']}", callback_data="noop")])
+    kb.append([InlineKeyboardButton(text="➕ ساخت لینک جدید", callback_data="admin:refs:new")])
+    kb.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
 @router.callback_query(F.data == "admin")
 async def admin_menu(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     await cb.message.edit_text("پنل ادمین:", reply_markup=kb_admin_root())
+
+
+@router.callback_query(F.data == "admin:refs")
+async def admin_refs(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    rows = list_referrals()
+    bot_un = getattr(cb.bot, "username", None) or "yourbot"
+    text_lines = ["📈 لینک‌های رفرال:"]
+    for r in rows[:10]:
+        code = r["code"]
+        link = f"https://t.me/{bot_un}?start=ref-{code}"
+        text_lines.append(f"{r['title'] or code}: کلیک {r['clicks']} | ثبت {r['signups']} | {link}")
+    if not rows:
+        text_lines.append("فعلاً لینکی ساخته نشده است.")
+    await cb.message.edit_text("\n".join(text_lines), reply_markup=kb_admin_refs(rows))
+
+
+@router.callback_query(F.data == "admin:refs:new")
+async def admin_refs_new(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    code = _generate_ref_code()
+    title = f"ref-{code}"
+    create_referral(code, title, cb.from_user.id)
+    await cb.answer("لینک جدید ساخته شد.")
+    await admin_refs(cb)
 
 
 def search_users_page(q: str, offset: int, limit: int):

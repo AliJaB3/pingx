@@ -84,6 +84,7 @@ def kb_admin_root():
             [InlineKeyboardButton(text="👥 کاربران", callback_data="admin:users:0:")],
             [InlineKeyboardButton(text="🎫 تیکت‌ها", callback_data="admin:tickets:0")],
             [InlineKeyboardButton(text="📦 پلن‌ها", callback_data="admin:plans")],
+            [InlineKeyboardButton(text="📈 لینک‌های رفرال", callback_data="admin:refs")],
             [InlineKeyboardButton(text="📝 قالب پیام", callback_data="admin:templates")],
             [InlineKeyboardButton(text="?? ???? ?????", callback_data="admin:settings")],
             [InlineKeyboardButton(text="🔌 تست اتصال 3x-ui", callback_data="admin:paneltest")],
