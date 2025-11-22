@@ -82,6 +82,7 @@ def migrate():
     add_col("purchases", "expiry_ms", "BIGINT")
     add_col("purchases", "created_at", "TEXT")
     add_col("purchases", "meta", "TEXT")
+    add_col("purchases", "last_expiry_notice", "INTEGER")
 
     cur.execute(
         """
@@ -91,6 +92,7 @@ def migrate():
         expiry_ms BIGINT, updated_at TEXT
     );"""
     )
+    add_col("cache_usage", "last_usage_warn", "TEXT")
 
     cur.execute(
         """

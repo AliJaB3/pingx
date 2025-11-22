@@ -1,5 +1,5 @@
-
-import json, secrets
+import json
+import secrets
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 import httpx
@@ -14,7 +14,14 @@ class ThreeXUIError(RuntimeError):
 
 class ThreeXUISession:
     def __init__(self, base_url: str, username: str, password: str):
-        self.base = base_url.rstrip('/')
+        base = (base_url or "").strip().rstrip("/")
+        low = base.lower()
+        for suffix in ("/panel", "/xui", "/dashboard"):
+            if low.endswith(suffix):
+                base = base[: -len(suffix)]
+                low = base.lower()
+                break
+        self.base = base or base_url.rstrip("/")
         self.username = username
         self.password = password
         self.client: httpx.AsyncClient | None = None
@@ -69,7 +76,6 @@ class ThreeXUISession:
         await self._ensure()
         r = await self.client.request(method, path, json=json_data, params=params, data=data, headers=headers)
         if r.status_code == 401:
-            # Session expired; re-login once
             self._logged_in = False
             await self._login()
             r = await self.client.request(method, path, json=json_data, params=params, data=data, headers=headers)
@@ -95,7 +101,6 @@ class ThreeXUISession:
         return []
 
     async def get_inbound(self, inbound_id: int):
-        # direct get endpoint if available
         for p in (f"/panel/api/inbounds/get/{inbound_id}",):
             try:
                 d = await self.request("GET", p)
@@ -128,7 +133,6 @@ class ThreeXUISession:
         c = await self._verify_client_added(inbound_id, email=email, client_id=None)
         if c:
             return c
-        # Try traffic endpoint that may return client info
         stat = await self.get_client_stats(inbound_id, client_id=email, email=email)
         return stat
 
@@ -151,9 +155,6 @@ class ThreeXUISession:
             "remark": remark,
         }
 
-        # طبق داکیومنت رسمی 3x-ui:
-        # POST /panel/api/inbounds/addClient
-        # body: { id: inbound_id, client: JSON-string-of-client }  یا settings شامل clients[]
         attempts = [
             (
                 "POST",
@@ -165,7 +166,28 @@ class ThreeXUISession:
             (
                 "POST",
                 "/panel/api/inbounds/addClient",
+                None,
+                {"id": int(inbound_id), "client": json.dumps(payload, ensure_ascii=False)},
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            ),
+            (
+                "POST",
+                "/panel/api/inbounds/addClient",
                 {"id": int(inbound_id), "settings": json.dumps({"clients": [payload]}, ensure_ascii=False)},
+                None,
+                None,
+            ),
+            (
+                "POST",
+                "/api/inbounds/addClient",
+                {"id": int(inbound_id), "client": json.dumps(payload, ensure_ascii=False)},
+                None,
+                None,
+            ),
+            (
+                "POST",
+                "/xui/inbound/addClient",
+                {"id": int(inbound_id), "client": json.dumps(payload, ensure_ascii=False)},
                 None,
                 None,
             ),
@@ -180,7 +202,6 @@ class ThreeXUISession:
                 if v:
                     payload.update({k: v for k, v in v.items()})
                     return {"client": payload, "resp": resp}
-                # Some panels return success flag without immediately reflecting settings
                 if isinstance(resp, dict) and resp.get("success") is True:
                     return {"client": payload, "resp": resp, "warn": "not verified, success flag only"}
             except Exception as e:
@@ -210,7 +231,6 @@ class ThreeXUISession:
         except Exception as e:
             last_err = e
 
-        # Fallback: update inbound with appended client (panel/api/inbounds/update/:id)
         try:
             ib = await self.get_inbound(inbound_id)
             if ib:
@@ -233,7 +253,6 @@ class ThreeXUISession:
         except Exception as e:
             last_err = e
 
-        # اگر خطای تکراری بودن ایمیل بود ولی کلاینت موجود است، همان را برگردان
         try:
             if isinstance(last_resp, dict) and "UNIQUE constraint failed: client_traffics.email" in str(last_resp.get("msg", "")):
                 existing = await self._find_client_by_email(inbound_id, email=email)
@@ -267,6 +286,8 @@ class ThreeXUISession:
         paths = [
             f"/panel/api/inbounds/updateClient/{client_id}",
             f"/panel/api/inbounds/{int(inbound_id)}/updateClient/{client_id}",
+            f"/api/inbounds/updateClient/{client_id}",
+            f"/xui/inbound/updateClient/{client_id}",
         ]
         body = {"id": int(inbound_id), "client": json.dumps(client_payload, ensure_ascii=False)}
         last = None
@@ -276,7 +297,6 @@ class ThreeXUISession:
                 return last
             except Exception as e:
                 last = e
-        # Fallback: update entire inbound settings if direct endpoint fails or missing id support
         try:
             inbound = await self.get_inbound(inbound_id)
             if inbound:
