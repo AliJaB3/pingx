@@ -432,16 +432,22 @@ async def sub_revoke(cb: CallbackQuery):
         if not real_id:
             logger.warning("subrevoke: missing client id pid=%s uid=%s inbound=%s", pid, cb.from_user.id, inbound_id)
             return await cb.answer("شناسه کاربر در پنل پیدا نشد.", show_alert=True)
-        # Rotate subId to invalidate قبلی و برگرداندن لینک جدید
+        # Rotate subId, then دوباره از پنل بخوان تا مقدار جدید قطعی شود
         new_sub = await three_session.rotate_subid(inbound_id, real_id, email=client_email)
-        latest_expiry = int(payload.get("expiryTime") or r.get("expiry_ms") or 0)
+        latest = None
+        try:
+            latest = await three_session.get_client_stats(inbound_id, real_id, client_email)
+        except Exception:
+            latest = None
+        new_id = (latest and latest.get("id")) or real_id
+        latest_expiry = int((latest and latest.get("expiryTime")) or r.get("expiry_ms") or 0)
         new_link = build_subscribe_url(new_sub)
         cur.execute(
-            "UPDATE purchases SET sub_id=?, sub_link=?, expiry_ms=? WHERE id=?",
-            (new_sub, new_link, latest_expiry, pid),
+            "UPDATE purchases SET sub_id=?, sub_link=?, expiry_ms=?, three_xui_client_id=? WHERE id=?",
+            (new_sub, new_link, latest_expiry, new_id, pid),
         )
         await _deliver_subscription_link(cb.bot, cb.from_user.id, new_link)
-        await cb.message.edit_text("✅ لینک جدید ارسال شد.", reply_markup=kb_mysubs(user_purchases(cb.from_user.id)))
+        await cb.message.edit_text("✅ لینک جدید این اشتراک ارسال شد.", reply_markup=kb_mysubs(user_purchases(cb.from_user.id)))
     except Exception as e:
         await cb.answer(f"خطا: {e}", show_alert=True)
 
