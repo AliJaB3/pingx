@@ -172,7 +172,7 @@ async def start(m: Message):
     existed = cur.execute("SELECT 1 FROM users WHERE user_id=?", (m.from_user.id,)).fetchone() is not None
     save_or_update_user(m.from_user)
     if ref_code and not existed:
-        inc_referral_signup(ref_code)
+        inc_referral_signup(ref_code, m.from_user)
     if not await check_force_join(m.bot, m.from_user.id):
         text, markup = await _force_join_message(m.bot)
         await m.answer(text, reply_markup=markup)

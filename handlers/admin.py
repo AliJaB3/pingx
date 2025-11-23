@@ -15,7 +15,7 @@ from db import (
     user_purchases, cache_get_usage,
     db_get_wallet, db_add_wallet, log_evt,
     db_list_plans, db_insert_plan, db_update_plan_field, db_delete_plan,
-    create_referral, list_referrals,
+    create_referral, list_referrals, get_referral, update_referral_title, update_referral_description, list_referral_joiners,
 )
 from utils import htmlesc, human_bytes, parse_channel_list
 from xui import three_session
@@ -37,6 +37,11 @@ SETTINGS_META = {
 }
 
 
+class RefEdit(StatesGroup):
+    title = State()
+    description = State()
+
+
 def _generate_ref_code():
     import secrets
 
@@ -50,7 +55,7 @@ def kb_admin_refs(rows):
     kb = []
     for r in rows[:10]:
         code = r["code"]
-        kb.append([InlineKeyboardButton(text=f"{r['title'] or code} | کلیک {r['clicks']} | ثبت {r['signups']}", callback_data="noop")])
+        kb.append([InlineKeyboardButton(text=f"{r['title'] or code} | کلیک {r['clicks']} | ثبت {r['signups']}", callback_data=f"admin:ref:{code}")])
     kb.append([InlineKeyboardButton(text="➕ ساخت لینک جدید", callback_data="admin:refs:new")])
     kb.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -68,14 +73,80 @@ async def admin_refs(cb: CallbackQuery):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     rows = list_referrals()
     bot_un = getattr(cb.bot, "username", None) or "yourbot"
-    text_lines = ["📈 لینک‌های رفرال:"]
+    text_lines = ["📈 لینک‌های رفرال (روی هر کد بزن تا جزئیات را ببینی):"]
     for r in rows[:10]:
         code = r["code"]
         link = f"https://t.me/{bot_un}?start=ref-{code}"
-        text_lines.append(f"{r['title'] or code}: کلیک {r['clicks']} | ثبت {r['signups']} | {link}")
+        clicks = int(r.get("clicks") or 0)
+        signups = int(r.get("signups") or 0)
+        conv = (signups / clicks * 100) if clicks else 0
+        desc = (r.get("description") or "").strip()
+        desc_snippet = f" — {desc[:40]}{'…' if len(desc) > 40 else ''}" if desc else ""
+        text_lines.append(
+            f"{r['title'] or code}: کلیک {clicks} | ثبت {signups} | تبدیل {conv:.1f}%{desc_snippet}\n{link}"
+        )
     if not rows:
         text_lines.append("فعلاً لینکی ساخته نشده است.")
     await cb.message.edit_text("\n".join(text_lines), reply_markup=kb_admin_refs(rows))
+
+
+def _build_ref_detail(bot_un: str, code: str):
+    r = get_referral(code)
+    if not r:
+        return None, None
+    link = f"https://t.me/{bot_un}?start=ref-{code}"
+    clicks = int(r.get("clicks") or 0)
+    signups = int(r.get("signups") or 0)
+    conv = (signups / clicks * 100) if clicks else 0
+    desc = (r.get("description") or "").strip() or "—"
+    created = (r.get("created_at") or "").replace("T", " ")[:19]
+    joiners = list_referral_joiners(code, limit=8)
+    lines = [
+        f"📌 <b>{htmlesc(r['title'] or code)}</b>",
+        f"کد: <code>{htmlesc(code)}</code>",
+        f"لینک: <a href=\"{htmlesc(link)}\">{htmlesc(link)}</a>",
+        f"توضیح: {htmlesc(desc)}",
+        f"کلیک: {clicks:,} | ثبت: {signups:,} | تبدیل: {conv:.1f}%",
+        f"ساخته شده: {htmlesc(created)}",
+    ]
+    if joiners:
+        lines.append("")
+        lines.append("آخرین عضوها:")
+        for j in joiners:
+            uname = j.get("username") or ""
+            name = (j.get("first_name") or "").strip() or "-"
+            label = f"@{uname}" if uname else name
+            joined = (j.get("joined_at") or "").replace("T", " ")[:16]
+            lines.append(f"• {htmlesc(label)} ({j.get('user_id')}) | {htmlesc(joined)}")
+    text = "\n".join(lines)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ ویرایش عنوان", callback_data=f"admin:ref:settitle:{code}")],
+            [InlineKeyboardButton(text="📝 ویرایش توضیح", callback_data=f"admin:ref:setdesc:{code}")],
+            [InlineKeyboardButton(text="⬅️ فهرست لینک‌ها", callback_data="admin:refs")],
+        ]
+    )
+    return text, kb
+
+
+async def _show_ref_detail(cb_or_msg, bot_un: str, code: str):
+    text, kb = _build_ref_detail(bot_un, code)
+    if not text:
+        if isinstance(cb_or_msg, CallbackQuery):
+            return await cb_or_msg.answer("کد پیدا نشد.", show_alert=True)
+        return await cb_or_msg.answer("کد پیدا نشد.")
+    if isinstance(cb_or_msg, CallbackQuery):
+        await cb_or_msg.message.edit_text(text, reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    else:
+        await cb_or_msg.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+
+
+@router.callback_query(F.data.regexp(r"^admin:ref:([a-zA-Z0-9]+)$"))
+async def admin_ref_detail(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    code = cb.data.split(":", 2)[2]
+    await _show_ref_detail(cb, getattr(cb.bot, "username", None) or "yourbot", code)
 
 
 @router.callback_query(F.data == "admin:refs:new")
@@ -87,6 +158,64 @@ async def admin_refs_new(cb: CallbackQuery):
     create_referral(code, title, cb.from_user.id)
     await cb.answer("لینک جدید ساخته شد.")
     await admin_refs(cb)
+
+
+@router.callback_query(F.data.regexp(r"^admin:ref:settitle:(.+)$"))
+async def admin_ref_set_title(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    code = cb.data.split(":", 3)[3]
+    await state.set_state(RefEdit.title)
+    await state.update_data(code=code)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"admin:ref:{code}")]])
+    await cb.message.edit_text(f"عنوان جدید برای {code} را بفرستید:", reply_markup=kb)
+
+
+@router.callback_query(F.data.regexp(r"^admin:ref:setdesc:(.+)$"))
+async def admin_ref_set_desc(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    code = cb.data.split(":", 3)[3]
+    await state.set_state(RefEdit.description)
+    await state.update_data(code=code)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"admin:ref:{code}")]])
+    await cb.message.edit_text(f"توضیح دلخواه برای {code} را بفرستید:", reply_markup=kb)
+
+
+@router.message(StateFilter(RefEdit.title))
+async def admin_ref_save_title(m: Message, state: FSMContext):
+    if not is_admin(m.from_user.id):
+        await m.answer("دسترسی غیرمجاز")
+        return await state.clear()
+    data = await state.get_data()
+    code = data.get("code")
+    new_title = (m.text or "").strip()
+    if not code:
+        await m.answer("کد پیدا نشد.")
+        return await state.clear()
+    if not new_title:
+        return await m.answer("عنوان نباید خالی باشد.")
+    update_referral_title(code, new_title[:64])
+    await m.answer("عنوان به‌روزرسانی شد.")
+    await _show_ref_detail(m, getattr(m.bot, "username", None) or "yourbot", code)
+    await state.clear()
+
+
+@router.message(StateFilter(RefEdit.description))
+async def admin_ref_save_desc(m: Message, state: FSMContext):
+    if not is_admin(m.from_user.id):
+        await m.answer("دسترسی غیرمجاز")
+        return await state.clear()
+    data = await state.get_data()
+    code = data.get("code")
+    new_desc = (m.text or "").strip()
+    if not code:
+        await m.answer("کد پیدا نشد.")
+        return await state.clear()
+    update_referral_description(code, new_desc[:240])
+    await m.answer("توضیح به‌روزرسانی شد.")
+    await _show_ref_detail(m, getattr(m.bot, "username", None) or "yourbot", code)
+    await state.clear()
 
 
 def search_users_page(q: str, offset: int, limit: int):

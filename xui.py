@@ -82,12 +82,23 @@ class ThreeXUISession:
             return
         try:
             ping = await self.client.get("/panel/api/inbounds/list")
-            if ping.status_code == 401:
+            if ping.status_code == 401 or self._looks_like_html(ping):
                 self._logged_in = False
                 await self._login()
         except Exception:
             self._logged_in = False
             await self._login()
+
+    @staticmethod
+    def _looks_like_html(resp: httpx.Response) -> bool:
+        """Detect responses that are likely HTML login pages instead of JSON API payloads."""
+        ctype = (resp.headers.get("content-type") or "").lower()
+        if "text/html" in ctype or "text/xml" in ctype:
+            return True
+        text = resp.text[:200].lstrip().lower() if resp.text else ""
+        if text.startswith("<!doctype html") or text.startswith("<html"):
+            return True
+        return False
 
     async def request(self, method: str, path: str, json_data=None, params=None, data=None, headers=None):
         await self._ensure()
@@ -95,11 +106,17 @@ class ThreeXUISession:
         safe_data = self._sanitize(data)
         safe_headers = self._sanitize(headers)
         logger.info("3xui request %s %s json=%s params=%s data=%s headers=%s", method, path, safe_json, params, safe_data, safe_headers)
-        r = await self.client.request(method, path, json=json_data, params=params, data=data, headers=headers)
-        if r.status_code == 401:
+
+        async def _do_request():
+            return await self.client.request(method, path, json=json_data, params=params, data=data, headers=headers)
+
+        r = await _do_request()
+        if r.status_code == 401 or self._looks_like_html(r):
+            # Session likely expired (login page HTML/redirect). Refresh login and retry once.
+            logger.warning("3xui session looks expired (status=%s, html=%s), re-authenticating", r.status_code, self._looks_like_html(r))
             self._logged_in = False
             await self._login()
-            r = await self.client.request(method, path, json=json_data, params=params, data=data, headers=headers)
+            r = await _do_request()
         logger.info("3xui response %s %s status=%s body=%s", method, path, r.status_code, (r.text[:500] if r.text else ""))
         r.raise_for_status()
         try:

@@ -144,6 +144,7 @@ def migrate():
     CREATE TABLE IF NOT EXISTS referral_links(
         code TEXT PRIMARY KEY,
         title TEXT,
+        description TEXT,
         created_by INTEGER,
         created_at TEXT,
         clicks INTEGER DEFAULT 0,
@@ -151,6 +152,21 @@ def migrate():
     );
     """
     )
+    add_col("referral_links", "description", "TEXT")
+    cur.execute(
+        """
+    CREATE TABLE IF NOT EXISTS referral_joins(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT,
+        user_id INTEGER,
+        username TEXT,
+        first_name TEXT,
+        last_name TEXT,
+        joined_at TEXT
+    );
+    """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_referral_joins_code ON referral_joins(code);")
 
 
 def set_setting(k, v):
@@ -271,10 +287,10 @@ def log_evt(actor_id: int, action: str, meta: dict):
 
 
 # Referral helpers
-def create_referral(code: str, title: str, created_by: int):
+def create_referral(code: str, title: str, created_by: int, description: str = ""):
     cur.execute(
-        "INSERT INTO referral_links(code,title,created_by,created_at,clicks,signups) VALUES(?,?,?,?,0,0)",
-        (code, title, int(created_by), now_iso()),
+        "INSERT INTO referral_links(code,title,description,created_by,created_at,clicks,signups) VALUES(?,?,?,?,?,0,0)",
+        (code, title, description, int(created_by), now_iso()),
     )
 
 
@@ -282,12 +298,46 @@ def list_referrals():
     return [dict(r) for r in cur.execute("SELECT * FROM referral_links ORDER BY created_at DESC").fetchall()]
 
 
+def get_referral(code: str):
+    r = cur.execute("SELECT * FROM referral_links WHERE code=?", (code,)).fetchone()
+    return dict(r) if r else None
+
+
+def update_referral_title(code: str, title: str):
+    cur.execute("UPDATE referral_links SET title=? WHERE code=?", (title, code))
+
+
+def update_referral_description(code: str, description: str):
+    cur.execute("UPDATE referral_links SET description=? WHERE code=?", (description, code))
+
+
 def inc_referral_click(code: str):
     cur.execute("UPDATE referral_links SET clicks=clicks+1 WHERE code=?", (code,))
 
 
-def inc_referral_signup(code: str):
+def _record_referral_join(code: str, u):
+    if not u:
+        return
+    cur.execute(
+        """
+    INSERT INTO referral_joins(code,user_id,username,first_name,last_name,joined_at)
+    VALUES(?,?,?,?,?,?)
+    """,
+        (code, u.id, u.username or "", u.first_name or "", u.last_name or "", now_iso()),
+    )
+
+
+def list_referral_joiners(code: str, limit: int = 10):
+    rows = cur.execute(
+        "SELECT * FROM referral_joins WHERE code=? ORDER BY id DESC LIMIT ?",
+        (code, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def inc_referral_signup(code: str, user=None):
     cur.execute("UPDATE referral_links SET signups=signups+1 WHERE code=?", (code,))
+    _record_referral_join(code, user)
 
 
 def save_or_update_user(u):
