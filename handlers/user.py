@@ -315,10 +315,21 @@ async def buy_confirm(cb: CallbackQuery):
         await _deliver_subscription_link(cb.bot, cb.from_user.id, sub_link)
     except Exception:
         logger.warning("Failed to send link/qr uid=%s", cb.from_user.id, exc_info=True)
-    await cb.message.edit_text(
-        get_setting("POST_PURCHASE_TEMPLATE", "✅ خرید انجام شد. لینک اشتراک برای شما ارسال شد."),
-        reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
+    success_text = get_setting(
+        "POST_PURCHASE_TEMPLATE",
+        "✅ خرید انجام شد. لینک اشتراک برای شما ارسال شد.",
     )
+    try:
+        await cb.message.edit_text(
+            success_text,
+            reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
+        )
+    except Exception:
+        await cb.bot.send_message(
+            cb.from_user.id,
+            success_text,
+            reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
+        )
 
 
 @router.callback_query(F.data == "mysubs")
@@ -401,77 +412,6 @@ async def sub_show_link(cb: CallbackQuery):
     except Exception:
         logger.exception("send sub link failed pid=%s uid=%s", pid, cb.from_user.id)
         await cb.answer("ارسال لینک با خطا مواجه شد.", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("subrevoke:"))
-async def sub_revoke(cb: CallbackQuery):
-    pid = int(cb.data.split(":")[1])
-    r = cur.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
-    if not r or r["user_id"] != cb.from_user.id:
-        return await cb.answer("این اشتراک یافت نشد یا برای شما نیست.", show_alert=True)
-    if not three_session:
-        return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
-    try:
-        inbound_id = int(r["three_xui_inbound_id"])
-        client_id = r["three_xui_client_id"]
-        client_email = r["client_email"] if "client_email" in r.keys() else None
-        sub_id = r["sub_id"] if "sub_id" in r.keys() else None
-
-        def _match_client(clients):
-            cid_norm = str(client_id or "").replace("-", "")
-            sub_norm = str(sub_id or "").replace("-", "")
-            for c in clients or []:
-                cid = str(c.get("id") or "").replace("-", "")
-                if cid_norm and cid == cid_norm:
-                    return c
-                if client_email and c.get("email") == client_email:
-                    return c
-                if sub_norm and str(c.get("subId") or "").replace("-", "") == sub_norm:
-                    return c
-            return None
-
-        # Fetch full payload to avoid wiping other fields on update
-        inbound = await three_session.get_inbound(inbound_id)
-        payload = None
-        clients = []
-        if inbound:
-            try:
-                s = inbound.get("settings")
-                s = json.loads(s) if isinstance(s, str) else (s or {})
-                clients = s.get("clients") or []
-                payload = _match_client(clients)
-            except Exception:
-                clients = []
-                payload = None
-        if not payload and client_email:
-            payload = await three_session.get_client_stats(inbound_id, client_id, client_email)
-        if not payload:
-            payload = _match_client(clients)
-        if not payload:
-            logger.warning("subrevoke: client not found pid=%s uid=%s inbound=%s", pid, cb.from_user.id, inbound_id)
-            return await cb.answer("کلاینت پیدا نشد.", show_alert=True)
-        real_id = payload.get("id") or client_id
-        if not real_id:
-            logger.warning("subrevoke: missing client id pid=%s uid=%s inbound=%s", pid, cb.from_user.id, inbound_id)
-            return await cb.answer("شناسه کاربر در پنل پیدا نشد.", show_alert=True)
-        # Rotate subId, then دوباره از پنل بخوان تا مقدار جدید قطعی شود
-        new_sub = await three_session.rotate_subid(inbound_id, real_id, email=client_email)
-        latest = None
-        try:
-            latest = await three_session.get_client_stats(inbound_id, real_id, client_email)
-        except Exception:
-            latest = None
-        new_id = (latest and latest.get("id")) or real_id
-        latest_expiry = int((latest and latest.get("expiryTime")) or r.get("expiry_ms") or 0)
-        new_link = build_subscribe_url(new_sub)
-        cur.execute(
-            "UPDATE purchases SET sub_id=?, sub_link=?, expiry_ms=?, three_xui_client_id=? WHERE id=?",
-            (new_sub, new_link, latest_expiry, new_id, pid),
-        )
-        await _deliver_subscription_link(cb.bot, cb.from_user.id, new_link)
-        await cb.message.edit_text("✅ لینک جدید این اشتراک ارسال شد.", reply_markup=kb_mysubs(user_purchases(cb.from_user.id)))
-    except Exception as e:
-        await cb.answer(f"خطا: {e}", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("substat:"))
