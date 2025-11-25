@@ -24,6 +24,14 @@ from config import PAGE_SIZE_TICKETS, TICKET_GROUP_ID
 router = Router()
 
 
+def kb_user_reply(tid: int):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ پاسخ", callback_data=f"ticket:reply:{tid}")],
+        ]
+    )
+
+
 class AdminReply(StatesGroup):
     waiting = State()
 
@@ -147,6 +155,12 @@ async def user_ticket_first_message(m: Message, state: FSMContext):
         return
     if m.text and m.text.startswith("/"):
         return
+    # If user replied to an admin message, stick to that ticket id
+    if m.reply_to_message:
+        tid = find_ticket_by_msg_id(m.reply_to_message.message_id)
+        if tid:
+            data = await state.get_data()
+            await state.update_data(tid=tid)
     data = await state.get_data()
     tid = data.get("tid")
     if not tid:
@@ -173,6 +187,12 @@ async def user_ticket_pipeline(m: Message):
         return
     if m.text and m.text.startswith("/"):
         return
+    # Respect replies to admin messages: map replied message_id back to ticket id
+    if m.reply_to_message:
+        tid = find_ticket_by_msg_id(m.reply_to_message.message_id)
+        if tid:
+            await _forward_user_ticket_message(m, tid)
+            return
     t = cur.execute(
         "SELECT id FROM tickets WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 1",
         (m.from_user.id,),
@@ -287,22 +307,22 @@ async def admin_reply_dispatch(m: Message, state: FSMContext):
     ticket_set_activity(tid)
     try:
         if m.photo:
-            sent = await m.bot.send_photo(uid, m.photo[-1].file_id, caption=m.caption or "")
+            sent = await m.bot.send_photo(uid, m.photo[-1].file_id, caption=m.caption or "", reply_markup=kb_user_reply(tid))
             store_tmsg(tid, "admin", m.from_user.id, "photo", m.photo[-1].file_id, m.caption or "", sent.message_id)
         elif m.document:
-            sent = await m.bot.send_document(uid, m.document.file_id, caption=m.caption or "")
+            sent = await m.bot.send_document(uid, m.document.file_id, caption=m.caption or "", reply_markup=kb_user_reply(tid))
             store_tmsg(tid, "admin", m.from_user.id, "document", m.document.file_id, m.caption or "", sent.message_id)
         elif m.voice:
-            sent = await m.bot.send_voice(uid, m.voice.file_id, caption=m.caption or "")
+            sent = await m.bot.send_voice(uid, m.voice.file_id, caption=m.caption or "", reply_markup=kb_user_reply(tid))
             store_tmsg(tid, "admin", m.from_user.id, "voice", m.voice.file_id, m.caption or "", sent.message_id)
         elif m.video:
-            sent = await m.bot.send_video(uid, m.video.file_id, caption=m.caption or "")
+            sent = await m.bot.send_video(uid, m.video.file_id, caption=m.caption or "", reply_markup=kb_user_reply(tid))
             store_tmsg(tid, "admin", m.from_user.id, "video", m.video.file_id, m.caption or "", sent.message_id)
         elif m.sticker:
             sent = await m.bot.send_sticker(uid, m.sticker.file_id)
             store_tmsg(tid, "admin", m.from_user.id, "sticker", m.sticker.file_id, None, sent.message_id)
         else:
-            sent = await m.bot.send_message(uid, m.text or "")
+            sent = await m.bot.send_message(uid, m.text or "", reply_markup=kb_user_reply(tid))
             store_tmsg(tid, "admin", m.from_user.id, "text", m.text or "", None, sent.message_id)
         await m.reply("پیام ارسال شد.")
     except Exception:
@@ -328,23 +348,34 @@ async def group_ticket_reply(m: Message):
     prefix = f"پاسخ پشتیبانی به تیکت #{tid}:"
     try:
         if m.photo:
-            sent = await m.bot.send_photo(uid, m.photo[-1].file_id, caption=f"{prefix}\n{m.caption or ''}")
+            sent = await m.bot.send_photo(uid, m.photo[-1].file_id, caption=f"{prefix}\n{m.caption or ''}", reply_markup=kb_user_reply(tid))
             store_tmsg(tid, "admin", m.from_user.id, "photo", m.photo[-1].file_id, m.caption or "", sent.message_id)
         elif m.document:
-            sent = await m.bot.send_document(uid, m.document.file_id, caption=f"{prefix}\n{m.caption or ''}")
+            sent = await m.bot.send_document(uid, m.document.file_id, caption=f"{prefix}\n{m.caption or ''}", reply_markup=kb_user_reply(tid))
             store_tmsg(tid, "admin", m.from_user.id, "document", m.document.file_id, m.caption or "", sent.message_id)
         elif m.voice:
-            sent = await m.bot.send_voice(uid, m.voice.file_id, caption=prefix)
+            sent = await m.bot.send_voice(uid, m.voice.file_id, caption=prefix, reply_markup=kb_user_reply(tid))
             store_tmsg(tid, "admin", m.from_user.id, "voice", m.voice.file_id, None, sent.message_id)
         elif m.video:
-            sent = await m.bot.send_video(uid, m.video.file_id, caption=f"{prefix}\n{m.caption or ''}")
+            sent = await m.bot.send_video(uid, m.video.file_id, caption=f"{prefix}\n{m.caption or ''}", reply_markup=kb_user_reply(tid))
             store_tmsg(tid, "admin", m.from_user.id, "video", m.video.file_id, m.caption or "", sent.message_id)
         elif m.sticker:
             sent = await m.bot.send_sticker(uid, m.sticker.file_id)
             store_tmsg(tid, "admin", m.from_user.id, "sticker", m.sticker.file_id, None, sent.message_id)
         else:
             text = m.text or m.caption or ""
-            sent = await m.bot.send_message(uid, f"{prefix}\n{text}")
+            sent = await m.bot.send_message(uid, f"{prefix}\n{text}", reply_markup=kb_user_reply(tid))
             store_tmsg(tid, "admin", m.from_user.id, "text", text, None, sent.message_id)
     except Exception:
         pass
+
+
+@router.callback_query(F.data.regexp(r"^ticket:reply:(\d+)$"))
+async def ticket_reply_button(cb: CallbackQuery, state: FSMContext):
+    if getattr(cb.message.chat, "type", "private") != "private":
+        return
+    tid = int(re.match(r"^ticket:reply:(\d+)$", cb.data).group(1))
+    await state.set_state(UserTicket.waiting_first)
+    await state.update_data(tid=tid)
+    await cb.answer()
+    await cb.message.answer(f"پیام خود را برای تیکت #{tid} بفرستید.", reply_markup=kb_user_ticket())
