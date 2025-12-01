@@ -1,12 +1,15 @@
 ﻿import re, json, secrets
+import os, sqlite3, tempfile, zipfile, shutil
+from datetime import datetime
+from pathlib import Path
 from aiogram import Router, F
 from aiogram.enums import ParseMode
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message, FSInputFile
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 
-from db import is_admin, get_admin_ids
+from db import is_admin, get_admin_ids, conn
 from keyboards import kb_admin_root
 from db import (
     cur,
@@ -19,7 +22,7 @@ from db import (
 )
 from utils import htmlesc, human_bytes, parse_channel_list
 from xui import three_session
-from config import THREEXUI_INBOUND_ID, PAGE_SIZE_USERS
+from config import THREEXUI_INBOUND_ID, PAGE_SIZE_USERS, DB_PATH
 
 router = Router()
 
@@ -41,6 +44,9 @@ class RefEdit(StatesGroup):
     title = State()
     description = State()
 
+class BackupRestore(StatesGroup):
+    restore_waiting = State()
+
 
 def _generate_ref_code():
     import secrets
@@ -50,6 +56,122 @@ def _generate_ref_code():
         if not cur.execute("SELECT 1 FROM referral_links WHERE code=?", (code,)).fetchone():
             return code
 
+
+def _create_backup_archive() -> tuple[Path, str]:
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    tmpdir = tempfile.mkdtemp(prefix="pingx-backup-")
+    tmp_path = Path(tmpdir)
+    db_copy = tmp_path / f"bot-{ts}.db"
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as src, sqlite3.connect(db_copy) as dst:
+        src.backup(dst)
+    settings_file = tmp_path / "settings.json"
+    settings_rows = [dict(r) for r in cur.execute("SELECT key,value FROM settings").fetchall()]
+    with settings_file.open("w", encoding="utf-8") as fh:
+        json.dump(settings_rows, fh, ensure_ascii=False, indent=2)
+    zip_path = tmp_path / f"pingx-backup-{ts}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write(db_copy, arcname="bot.db")
+        zf.write(settings_file, arcname="settings.json")
+    return zip_path, tmpdir
+
+
+def _backup_live_db() -> Path:
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_dir = Path("backups")
+    backup_dir.mkdir(exist_ok=True)
+    dst_path = backup_dir / f"before-restore-{ts}.db"
+    with sqlite3.connect(dst_path) as dst:
+        conn.backup(dst)
+    return dst_path
+
+
+def _restore_into_live(db_source: Path):
+    with sqlite3.connect(db_source) as src:
+        src.backup(conn)
+    conn.commit()
+
+
+@router.callback_query(F.data == "admin:backup")
+async def admin_backup(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    await cb.answer("در حال تهیه بکاپ...")
+    zip_path = None
+    tmpdir = None
+    try:
+        zip_path, tmpdir = _create_backup_archive()
+        await cb.message.answer_document(
+            FSInputFile(zip_path),
+            caption="Backup آماده شد. فایل zip را نگه دارید.",
+        )
+    except Exception as e:
+        await cb.message.answer(f"خطا در بکاپ: {e}")
+    finally:
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@router.callback_query(F.data == "admin:restore")
+async def admin_restore(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="لغو", callback_data="admin:restore:cancel")]])
+    await state.set_state(BackupRestore.restore_waiting)
+    await cb.message.edit_text(
+        "فایل بکاپ (.zip یا .db) را ارسال کنید. پیش از ریستور یک کپی ایمن از دیتابیس فعلی گرفته می‌شود.",
+        reply_markup=kb,
+    )
+
+
+@router.callback_query(F.data == "admin:restore:cancel")
+async def admin_restore_cancel(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    await state.clear()
+    await cb.message.edit_text("پنل ادمین:", reply_markup=kb_admin_root())
+
+
+@router.message(StateFilter(BackupRestore.restore_waiting))
+async def admin_restore_file(m: Message, state: FSMContext):
+    if not is_admin(m.from_user.id):
+        await m.answer("دسترسی غیرمجاز")
+        return await state.clear()
+    if not m.document:
+        return await m.answer("یک فایل بکاپ .zip یا .db ارسال کنید.")
+    size_limit = 50 * 1024 * 1024
+    if m.document.file_size and m.document.file_size > size_limit:
+        return await m.answer("حجم فایل زیاد است. حداکثر 50MB.")
+
+    tmpdir = tempfile.mkdtemp(prefix="pingx-restore-")
+    tmp_path = Path(tmpdir)
+    fname = m.document.file_name or "restore.bin"
+    dest = tmp_path / fname
+    try:
+        await m.document.download(destination=dest)
+        db_source = None
+        if dest.suffix.lower() == ".zip":
+            with zipfile.ZipFile(dest, "r") as zf:
+                db_member = next((n for n in zf.namelist() if n.lower().endswith(".db")), None)
+                if not db_member:
+                    return await m.answer("در فایل zip هیچ دیتابیس (.db) پیدا نشد.")
+                zf.extract(db_member, tmp_path)
+                db_source = (tmp_path / db_member).resolve()
+        elif dest.suffix.lower() == ".db":
+            db_source = dest
+        else:
+            return await m.answer("فرمت پشتیبانی نمی‌شود. فقط .zip یا .db.")
+
+        if not db_source or not db_source.exists():
+            return await m.answer("فایل دیتابیس پیدا نشد.")
+
+        safety = _backup_live_db()
+        _restore_into_live(db_source)
+        await m.answer(f"ریستور انجام شد. نسخه فعلی قبل از ریستور در {safety} ذخیره شد.", reply_markup=kb_admin_root())
+        await state.clear()
+    except Exception as e:
+        await m.answer(f"ریستور با خطا مواجه شد: {e}")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 def kb_admin_refs(rows):
     kb = []

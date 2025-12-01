@@ -85,6 +85,7 @@ def kb_admin_root():
             [InlineKeyboardButton(text="📦 پلن‌ها", callback_data="admin:plans")],
             [InlineKeyboardButton(text="📈 لینک‌های رفرال", callback_data="admin:refs")],
             [InlineKeyboardButton(text="📝 قالب پیام", callback_data="admin:templates")],
+            [InlineKeyboardButton(text="Backup", callback_data="admin:backup"), InlineKeyboardButton(text="Restore", callback_data="admin:restore")],
             [InlineKeyboardButton(text="?? ???? ?????", callback_data="admin:settings")],
             [InlineKeyboardButton(text="🔌 تست اتصال 3x-ui", callback_data="admin:paneltest")],
             [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="home")],
