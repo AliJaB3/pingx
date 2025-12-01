@@ -47,6 +47,15 @@ class ThreeXUISession:
     def _create_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(base_url=self.base, timeout=20.0, follow_redirects=True)
 
+    async def _reset_client(self):
+        if self.client:
+            try:
+                await self.client.aclose()
+            except Exception:
+                pass
+        self.client = self._create_client()
+        self._logged_in = False
+
     async def close(self):
         if self.client:
             await self.client.aclose()
@@ -54,8 +63,7 @@ class ThreeXUISession:
             self._logged_in = False
 
     async def _login(self):
-        if not self.client:
-            self.client = self._create_client()
+        await self._reset_client()
         payload = {"username": self.username, "password": self.password}
         attempts = [
             ("POST", "/login", None, payload, None),
@@ -83,10 +91,10 @@ class ThreeXUISession:
         try:
             ping = await self.client.get("/panel/api/inbounds/list")
             if ping.status_code == 401 or self._looks_like_html(ping):
-                self._logged_in = False
+                await self._reset_client()
                 await self._login()
         except Exception:
-            self._logged_in = False
+            await self._reset_client()
             await self._login()
 
     @staticmethod
@@ -114,7 +122,7 @@ class ThreeXUISession:
         if r.status_code == 401 or self._looks_like_html(r):
             # Session likely expired (login page HTML/redirect). Refresh login and retry once.
             logger.warning("3xui session looks expired (status=%s, html=%s), re-authenticating", r.status_code, self._looks_like_html(r))
-            self._logged_in = False
+            await self._reset_client()
             await self._login()
             r = await _do_request()
         logger.info("3xui response %s %s status=%s body=%s", method, path, r.status_code, (r.text[:500] if r.text else ""))
@@ -278,11 +286,8 @@ class ThreeXUISession:
                 clients = list(s.get("clients") or [])
                 clients.append(payload)
                 s["clients"] = clients
-                resp = await self.request(
-                    "POST",
-                    f"/panel/api/inbounds/update/{int(inbound_id)}",
-                    json_data={"id": int(inbound_id), "settings": json.dumps(s, ensure_ascii=False)},
-                )
+                full_payload = self._build_full_inbound_update(ib, inbound_id, s)
+                resp = await self.request("POST", f"/panel/api/inbounds/update/{int(inbound_id)}", json_data=full_payload)
                 last_resp = resp
                 v = await self._verify_client_added(inbound_id, email=email, client_id=new_id)
                 if v:
@@ -320,6 +325,47 @@ class ThreeXUISession:
             last_err = e
 
         raise ThreeXUIError(f"addClient failed on all endpoints: last_err={last_err}, last_resp={last_resp}")
+
+    @staticmethod
+    def _serialize_settings_value(val):
+        if isinstance(val, (dict, list)):
+            return json.dumps(val, ensure_ascii=False)
+        return val
+
+    def _build_full_inbound_update(self, inbound: dict, inbound_id: int, new_settings: dict) -> dict:
+        """
+        Build a full inbound payload for /update calls.
+        Sending only `id` + `settings` causes the panel to reset other fields after a while,
+        so we always send back the critical fields we read from the panel.
+        """
+        fields = (
+            "id",
+            "up",
+            "down",
+            "total",
+            "remark",
+            "enable",
+            "expiryTime",
+            "listen",
+            "port",
+            "protocol",
+            "settings",
+            "streamSettings",
+            "sniffing",
+            "allocate",
+            "tag",
+        )
+        payload = {}
+        inbound = inbound or {}
+        inbound["id"] = inbound.get("id") or inbound_id
+        for f in fields:
+            if f == "settings":
+                payload[f] = json.dumps(new_settings, ensure_ascii=False)
+                continue
+            if f in inbound:
+                payload[f] = self._serialize_settings_value(inbound.get(f))
+        payload["id"] = int(payload.get("id", inbound_id))
+        return payload
 
     async def update_client(self, inbound_id: int, client_id: str, client_payload: dict):
         payload_str = json.dumps(client_payload, ensure_ascii=False)
@@ -383,7 +429,7 @@ class ThreeXUISession:
                         break
                 if replaced:
                     s["clients"] = clients
-                    payload = {"id": int(inbound_id), "settings": json.dumps(s, ensure_ascii=False)}
+                    payload = self._build_full_inbound_update(inbound, inbound_id, s)
                     return await self.request("POST", f"/panel/api/inbounds/update/{int(inbound_id)}", json_data=payload)
         except Exception as e:
             last = e

@@ -221,9 +221,13 @@ def remove_admin(uid: int):
 
 
 def ensure_defaults():
-    # Force non-editable settings to config values on each boot
-    set_setting("ACTIVE_INBOUND_ID", str(THREEXUI_INBOUND_ID))
-    set_setting("REQUIRED_CHANNEL", REQUIRED_CHANNEL)
+    # Only backfill defaults when a value is missing; don't override panel changes.
+    def set_if_missing(key: str, value):
+        if get_setting(key) is None:
+            set_setting(key, value)
+
+    set_if_missing("ACTIVE_INBOUND_ID", str(THREEXUI_INBOUND_ID))
+    set_if_missing("REQUIRED_CHANNEL", REQUIRED_CHANNEL)
     if not (get_setting("REQUIRED_CHANNELS") or "").strip():
         set_setting("REQUIRED_CHANNELS", REQUIRED_CHANNEL)
     if not get_setting("WELCOME_TEMPLATE"):
@@ -232,12 +236,12 @@ def ensure_defaults():
         set_setting("POST_PURCHASE_TEMPLATE", "✅ خرید انجام شد و لینک اشتراک ارسال شد.")
     if not get_setting("CARD_NUMBER"):
         set_setting("CARD_NUMBER", CARD_NUMBER)
-    set_setting("SUB_HOST", SUB_HOST or "")
-    set_setting("SUB_SCHEME", SUB_SCHEME or "https")
-    set_setting("SUB_PATH", SUB_PATH or "/sub/")
-    set_setting("SUB_PORT", str(SUB_PORT))
-    set_setting("MAX_RECEIPT_PHOTOS", str(MAX_RECEIPT_PHOTOS))
-    set_setting("MAX_RECEIPT_MB", str(MAX_RECEIPT_MB))
+    set_if_missing("SUB_HOST", SUB_HOST or "")
+    set_if_missing("SUB_SCHEME", SUB_SCHEME or "https")
+    set_if_missing("SUB_PATH", SUB_PATH or "/sub/")
+    set_if_missing("SUB_PORT", str(SUB_PORT))
+    set_if_missing("MAX_RECEIPT_PHOTOS", str(MAX_RECEIPT_PHOTOS))
+    set_if_missing("MAX_RECEIPT_MB", str(MAX_RECEIPT_MB))
     if not get_setting("PURCHASE_SUCCESS_TEMPLATE"):
         set_setting("PURCHASE_SUCCESS_TEMPLATE", "🥳 اشتراک شما آماده شد. لینک برایتان ارسال شد.")
     if not get_setting("PURCHASE_FAILED_TEMPLATE"):
