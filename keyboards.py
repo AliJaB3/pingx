@@ -1,5 +1,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from utils import format_toman
+
 
 def kb_main(uid: int, is_admin: bool, is_support: bool = False):
     btns = [
@@ -48,9 +50,9 @@ def kb_plans(plans, is_admin: bool, discount_pct: int = 0):
             continue
         price = int(p.get("price") or 0)
         final_price = int(price * (100 - pct) / 100) if pct > 0 else price
-        price_txt = f"{final_price:,} تومان"
+        price_txt = format_toman(final_price)
         if pct > 0:
-            price_txt += f" ({price:,})"
+            price_txt += f" ({format_toman(price)})"
         rows.append(
             [
                 InlineKeyboardButton(
@@ -67,7 +69,7 @@ def kb_mysubs(rows):
     kb = [
         [
             InlineKeyboardButton(
-                text=f"اشتراک #{r['id']} • {r['plan_id']} • {r['price']:,} تومان",
+                text=f"اشتراک #{r['id']} • {r['plan_id']} • {format_toman(r['price'])}",
                 callback_data=f"sub:{r['id']}",
             )
         ]

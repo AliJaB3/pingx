@@ -41,7 +41,7 @@ from db import (
     events_count,
     get_global_discount_percent,
 )
-from utils import htmlesc, human_bytes, parse_channel_list, TZ
+from utils import htmlesc, human_bytes, parse_channel_list, TZ, format_toman
 from xui import three_session
 from config import THREEXUI_INBOUND_ID, PAGE_SIZE_USERS, DB_PATH
 
@@ -324,10 +324,10 @@ async def admin_reports_range(cb: CallbackQuery):
     labels = {1: "امروز", 7: "۷ روز اخیر", 30: "۳۰ روز اخیر"}
     lines = [
         f"🗓 بازه: {labels.get(days, days)}",
-        f"💰 درآمد: {revenue:,} تومان",
+        f"💰 درآمد: {format_toman(revenue)}",
         f"🧾 سفارشات: {orders:,}",
         f"🛍 خریداران یونیک: {buyers:,}",
-        f"💳 AOV: {int(aov):,} تومان" if aov else "💳 AOV: 0",
+        f"💳 AOV: {format_toman(int(aov))}",
         f"🎯 کانورژن ساده: {conversion:.1f}%",
         f"📊 قیف خرید: {funnel:.1f}% (purchase_success / checkout_initiated)",
         f"رویدادها: checkout_initiated={checkout:,} | purchase_success={success:,}",
@@ -532,7 +532,7 @@ def kb_admin_users_list(rows, page: int, total: int, page_size: int, q: str | No
         kb.append(
             [
                 InlineKeyboardButton(
-                    text=f"{name} ({r['user_id']}) · {r['wallet']:,}",
+                    text=f"{name} ({r['user_id']}) · {format_toman(r['wallet'])}",
                     callback_data=f"admin:u:{r['user_id']}",
                 )
             ]
@@ -585,7 +585,7 @@ async def _render_admin_user_detail(cb: CallbackQuery, uid: int):
         f"<b>کاربر {uid}</b>\n"
         f"نام: {(u['first_name'] or '').strip()} {(u['last_name'] or '').strip()}\n"
         f"یوزرنیم: @{u['username'] or '-'}\n"
-        f"موجودی فعلی: {u['wallet']:,}\n"
+        f"موجودی فعلی: {format_toman(u['wallet'])}\n"
         f"تاریخ عضویت: {u['created_at'][:19].replace('T',' ')}"
     )
     kb = InlineKeyboardMarkup(
@@ -642,7 +642,7 @@ async def admin_user_buys(cb: CallbackQuery):
             ts = r.get("created_at") or ""
             ts = ts[:19].replace("T", " ") if ts else "-"
             lines.append(
-                f"#{r['id']} | پلن {htmlesc(r['plan_id'])} | مبلغ {r['price']:,} | تاریخ {ts}"
+                f"#{r['id']} | پلن {htmlesc(r['plan_id'])} | مبلغ {format_toman(r['price'])} | تاریخ {ts}"
             )
         text = "<b>خریدهای اخیر:</b>\n" + "\n".join(lines)
     kb = InlineKeyboardMarkup(
@@ -715,7 +715,7 @@ async def admin_plans(cb: CallbackQuery, state: FSMContext):
         kb.append(
             [
                 InlineKeyboardButton(
-                    text=f"[{p.get('sort_order')}] {p['id']} | {p['title']} | {p['price']:,}",
+                    text=f"[{p.get('sort_order')}] {p['id']} | {p['title']} | {format_toman(p['price'])}",
                     callback_data=f"admin2:plan:{p['id']}",
                 )
             ]
@@ -816,7 +816,7 @@ async def admin_plan_view(cb: CallbackQuery, state: FSMContext):
         f"Title: {htmlesc(p['title'])}\n"
         f"Days: {p['days']}\n"
         f"GB: {p['gb']}\n"
-        f"Price: {p['price']:,}"
+        f"Price: {format_toman(p['price'])}"
     )
     await cb.message.edit_text(
         txt, reply_markup=kb_plan_detail(p), parse_mode=ParseMode.HTML

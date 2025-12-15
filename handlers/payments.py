@@ -21,7 +21,7 @@ from db import (
     db_list_pending_payments_page,
     get_setting,
 )
-from utils import htmlesc
+from utils import htmlesc, format_toman
 import json, re
 
 router = Router()
@@ -64,7 +64,7 @@ class Topup(StatesGroup):
 
 def _kb_amounts():
     amounts = [150_000, 300_000, 500_000, 1_000_000, 2_000_000]
-    rows = [[InlineKeyboardButton(text=f"{amt:,} تومان", callback_data=f"topamt:{amt}")] for amt in amounts]
+    rows = [[InlineKeyboardButton(text=format_toman(amt), callback_data=f"topamt:{amt}")] for amt in amounts]
     rows.append([InlineKeyboardButton(text="💵 مبلغ دلخواه", callback_data="topamt:custom")])
     rows.append([InlineKeyboardButton(text="↩️ بازگشت", callback_data="wallet")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -135,7 +135,7 @@ async def _submit_topup_request(bot, user, amount, media, notes):
         f"رسید واریز #{pid}\n"
         f"کاربر: <a href=\"tg://user?id={user.id}\">{htmlesc(user.full_name or user.username or str(user.id))}</a>\n"
         f"آیدی: {user.id}\n"
-        f"مبلغ: {amount:,}"
+        f"مبلغ: {format_toman(amount)}"
     )
     if note_txt:
         summary += f"\nتوضیحات: {htmlesc(note_txt)}"
@@ -171,7 +171,7 @@ async def wallet(cb: CallbackQuery):
             [InlineKeyboardButton(text="↩️ بازگشت", callback_data="home")],
         ]
     )
-    await cb.message.edit_text(f"💰 موجودی کیف پول: <b>{bal:,}</b> تومان", reply_markup=kb, parse_mode=ParseMode.HTML)
+    await cb.message.edit_text(f"💰 موجودی کیف پول: <b>{format_toman(bal)}</b>", reply_markup=kb, parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data == "topup")
@@ -208,7 +208,7 @@ async def topup_select_amount(cb: CallbackQuery, state: FSMContext):
     logger.info("Topup amount set uid=%s amount=%s", cb.from_user.id, amount)
     await cb.message.edit_text(
         _with_card_info(
-            f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\nرسید/توضیحات را بفرست؛ پس از دریافت عکس، درخواست به‌صورت خودکار ثبت می‌شود."
+            f"مبلغ انتخاب شد: <b>{format_toman(amount)}</b>\nرسید/توضیحات را بفرست؛ پس از دریافت عکس، درخواست به‌صورت خودکار ثبت می‌شود."
         ),
         reply_markup=_kb_amount_selected(),
         parse_mode=ParseMode.HTML,
@@ -315,7 +315,7 @@ async def topup_amount_manual(m: Message, state: FSMContext):
     logger.info("Topup custom amount set uid=%s amount=%s", m.from_user.id, amount)
     await m.reply(
         _with_card_info(
-            f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\nرسید/توضیحات را بفرست؛ پس از دریافت عکس، درخواست به‌صورت خودکار ثبت می‌شود."
+            f"مبلغ انتخاب شد: <b>{format_toman(amount)}</b>\nرسید/توضیحات را بفرست؛ پس از دریافت عکس، درخواست به‌صورت خودکار ثبت می‌شود."
         ),
         reply_markup=_kb_amount_selected(),
         parse_mode=ParseMode.HTML,
@@ -323,7 +323,7 @@ async def topup_amount_manual(m: Message, state: FSMContext):
 
 
 def _wallet_text(bal: int) -> str:
-    return f"💰 موجودی فعلی شما: <b>{bal:,}</b> تومان"
+    return f"💰 موجودی فعلی شما: <b>{format_toman(bal)}</b>"
 
 
 def _topup_main_keyboard():
@@ -345,7 +345,7 @@ async def admin_pending(cb: CallbackQuery):
     rows, total = db_list_pending_payments_page(off, size)
     kb_rows = []
     for r in rows:
-        kb_rows.append([InlineKeyboardButton(text=f"#{r['id']} مبلغ {r['amount']:,}", callback_data=f"payview:{r['id']}")])
+        kb_rows.append([InlineKeyboardButton(text=f"#{r['id']} مبلغ {format_toman(r['amount'])}", callback_data=f"payview:{r['id']}")])
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="⬅️ قبلی", callback_data=f"admin:pending:{page-1}"))
@@ -392,7 +392,7 @@ async def admin_pay_view(cb: CallbackQuery):
     text = (
         f"درخواست #{pid}\n"
         f"کاربر: <a href=\"tg://user?id={r['user_id']}\">{r['user_id']}</a>\n"
-        f"مبلغ: {r['amount']:,}\n"
+        f"مبلغ: {format_toman(r['amount'])}\n"
     )
     if r.get("note"):
         text += f"توضیحات:\n{htmlesc(r['note'])}\n"
@@ -431,7 +431,7 @@ async def admin_pay_ok(cb: CallbackQuery):
     db_update_payment_status(pid, "approved")
     logger.info("Topup approved pid=%s uid=%s amount=%s by_admin=%s", pid, r["user_id"], r["amount"], cb.from_user.id)
     try:
-        await cb.bot.send_message(r["user_id"], f"پرداخت شما به مبلغ {r['amount']:,} تایید شد و به کیف پولتان اضافه شد.")
+        await cb.bot.send_message(r["user_id"], f"پرداخت شما به مبلغ {format_toman(r['amount'])} تایید شد و به کیف پولتان اضافه شد.")
     except Exception:
         pass
     actor_label = cb.from_user.full_name or cb.from_user.username or cb.from_user.id

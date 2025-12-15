@@ -17,6 +17,22 @@ def progress_bar(p:float,w:int=20)->str:
 
 def now_iso(): return datetime.now(TZ).isoformat()
 
+def format_toman(amount:int|float)->str:
+    try:
+        amt = int(round(float(amount)))
+    except Exception:
+        try:
+            amt = int(amount)
+        except Exception:
+            return f"{amount} تومان"
+    return f"{amt:,} تومان"
+
+def format_identity(user_id:int, username:str|None, full_name:str|None)->str:
+    if username:
+        return f"@{htmlesc(username)}"
+    display = htmlesc(full_name or str(user_id))
+    return f'<a href="tg://user?id={user_id}">{display}</a>'
+
 def safe_name_from_user(user):
     if getattr(user,"username",None): return f"{user.username}@telegram"
     base = (user.first_name or "tg") + ("-" + user.last_name if user.last_name else "")

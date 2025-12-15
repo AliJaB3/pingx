@@ -123,10 +123,15 @@ def migrate():
         content TEXT,
         caption TEXT,
         tg_msg_id INTEGER,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        src_chat_id INTEGER,
+        src_message_id INTEGER
     );"""
     )
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tmsg_ticket ON ticket_messages(ticket_id);")
+    add_col("ticket_messages", "src_chat_id", "INTEGER")
+    add_col("ticket_messages", "src_message_id", "INTEGER")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tmsg_src ON ticket_messages(ticket_id,src_chat_id,src_message_id);")
 
     cur.execute(
         """
@@ -674,15 +679,29 @@ def ticket_close(tid: int):
     cur.execute("UPDATE tickets SET status='closed', closed_at=?, last_activity=? WHERE id=?", (now_iso(), now_iso(), tid))
 
 
-def store_tmsg(tid: int, sender_type: str, sender_id: int, kind: str, content: str | None, caption: str | None, tg_msg_id: int | None):
-    cur.execute(
-        """
-    INSERT INTO ticket_messages(ticket_id,sender_type,sender_id,kind,content,caption,tg_msg_id,created_at)
-    VALUES(?,?,?,?,?,?,?,?)
-    """,
-        (tid, sender_type, sender_id, kind, content, caption, tg_msg_id, now_iso()),
-    )
-    return cur.lastrowid
+def store_tmsg(
+    tid: int,
+    sender_type: str,
+    sender_id: int,
+    kind: str,
+    content: str | None,
+    caption: str | None,
+    tg_msg_id: int | None,
+    src_chat_id: int | None = None,
+    src_message_id: int | None = None,
+):
+    try:
+        cur.execute(
+            """
+        INSERT INTO ticket_messages(ticket_id,sender_type,sender_id,kind,content,caption,tg_msg_id,created_at,src_chat_id,src_message_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?)
+        """,
+            (tid, sender_type, sender_id, kind, content, caption, tg_msg_id, now_iso(), src_chat_id, src_message_id),
+        )
+        return cur.lastrowid
+    except sqlite3.IntegrityError:
+        # Duplicate source message, ignore
+        return None
 
 
 def list_tickets_page(page: int, size: int):
@@ -690,7 +709,12 @@ def list_tickets_page(page: int, size: int):
     rows = [
         dict(r)
         for r in cur.execute(
-            """        SELECT * FROM tickets ORDER BY (status='open') DESC, last_activity DESC LIMIT ? OFFSET ?
+            """
+        SELECT t.*, u.username, u.first_name, u.last_name
+        FROM tickets t
+        LEFT JOIN users u ON u.user_id = t.user_id
+        ORDER BY (t.status='open') DESC, t.last_activity DESC
+        LIMIT ? OFFSET ?
     """,
             (size, off),
         ).fetchall()
@@ -704,8 +728,23 @@ def list_ticket_messages_page(tid: int, page: int, size: int):
     rows = [
         dict(r)
         for r in cur.execute(
-            """        SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id DESC LIMIT ? OFFSET ?
-    """,
+            """
+            SELECT
+                id,
+                ticket_id,
+                sender_type AS sender_role,
+                content AS text,
+                caption AS media_json,
+                created_at,
+                src_chat_id,
+                src_message_id,
+                kind,
+                sender_id
+            FROM ticket_messages
+            WHERE ticket_id=?
+            ORDER BY id ASC
+            LIMIT ? OFFSET ?
+            """,
             (tid, size, off),
         ).fetchall()
     ]

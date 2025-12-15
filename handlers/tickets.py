@@ -20,7 +20,7 @@ from db import (
     find_ticket_by_msg_id,
     cur,
 )
-from utils import htmlesc
+from utils import htmlesc, format_identity
 from config import PAGE_SIZE_TICKETS, TICKET_GROUP_ID
 
 router = Router()
@@ -70,30 +70,64 @@ async def _forward_user_ticket_message(m: Message, tid: int):
         f"پیام جدید در تیکت #{tid} از "
         f"<a href=\"tg://user?id={m.from_user.id}\">{htmlesc(m.from_user.full_name or m.from_user.username or str(m.from_user.id))}</a>"
     )
+    # ثبت یکباره پیام با منبع اصلی
+    kind = "text"
+    content = m.text or ""
+    caption = m.caption or ""
+    if m.photo:
+        kind = "photo"
+        content = m.photo[-1].file_id
+    elif m.document:
+        kind = "document"
+        content = m.document.file_id
+    elif m.voice:
+        kind = "voice"
+        content = m.voice.file_id
+    elif m.video:
+        kind = "video"
+        content = m.video.file_id
+    elif m.sticker:
+        kind = "sticker"
+        content = m.sticker.file_id
+    msg_db_id = store_tmsg(
+        tid,
+        "user",
+        m.from_user.id,
+        kind,
+        content or "",
+        caption or "",
+        tg_msg_id=None,
+        src_chat_id=m.chat.id,
+        src_message_id=m.message_id,
+    )
+
     kb = kb_admin_reply(tid)
     recipients = list(get_admin_ids().union(get_support_ids()))
     if TICKET_GROUP_ID:
         recipients.append(TICKET_GROUP_ID)
     for aid in recipients:
         try:
+            sent = None
             if m.photo:
                 sent = await m.bot.send_photo(aid, m.photo[-1].file_id, caption=header, reply_markup=kb, parse_mode=ParseMode.HTML)
-                store_tmsg(tid, "user", m.from_user.id, "photo", m.photo[-1].file_id, (m.caption or ""), sent.message_id)
             elif m.document:
                 sent = await m.bot.send_document(aid, m.document.file_id, caption=header, reply_markup=kb, parse_mode=ParseMode.HTML)
-                store_tmsg(tid, "user", m.from_user.id, "document", m.document.file_id, (m.caption or ""), sent.message_id)
             elif m.voice:
                 sent = await m.bot.send_voice(aid, m.voice.file_id, caption=header, reply_markup=kb, parse_mode=ParseMode.HTML)
-                store_tmsg(tid, "user", m.from_user.id, "voice", m.voice.file_id, (m.caption or ""), sent.message_id)
             elif m.video:
                 sent = await m.bot.send_video(aid, m.video.file_id, caption=header, reply_markup=kb, parse_mode=ParseMode.HTML)
-                store_tmsg(tid, "user", m.from_user.id, "video", m.video.file_id, (m.caption or ""), sent.message_id)
             elif m.sticker:
                 sent = await m.bot.send_sticker(aid, m.sticker.file_id)
-                store_tmsg(tid, "user", m.from_user.id, "sticker", m.sticker.file_id, None, sent.message_id)
             else:
                 sent = await m.bot.send_message(aid, f"{header}:\n{htmlesc(m.text or '').strip()}", reply_markup=kb, parse_mode=ParseMode.HTML)
-                store_tmsg(tid, "user", m.from_user.id, "text", m.text or "", None, sent.message_id)
+            if msg_db_id and sent:
+                try:
+                    if aid == TICKET_GROUP_ID:
+                        cur.execute("UPDATE ticket_messages SET tg_msg_id=? WHERE id=?", (sent.message_id, msg_db_id))
+                    else:
+                        cur.execute("UPDATE ticket_messages SET tg_msg_id=? WHERE id=? AND tg_msg_id IS NULL", (sent.message_id, msg_db_id))
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -215,8 +249,12 @@ async def admin_tickets_list(cb: CallbackQuery):
         return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
     page = int(re.match(r"^admin:tickets:(\d+)$", cb.data).group(1))
     rows, total = list_tickets_page(page, PAGE_SIZE_TICKETS)
+    lines = []
     kb = []
     for r in rows:
+        full_name = ((r.get("first_name") or "") + " " + (r.get("last_name") or "")).strip() or None
+        mention = format_identity(r.get("user_id"), r.get("username"), full_name or str(r.get("user_id")))
+        lines.append(f"#T{r['id']} | UID:{r.get('user_id')} | {mention} | {r['status']}")
         kb.append([InlineKeyboardButton(text=f"#T{r['id']} | UID:{r.get('user_id')} | {r['status']}", callback_data=f"adm:tkt:view:{r['id']}:0")])
     nav = []
     if page > 0:
@@ -226,7 +264,8 @@ async def admin_tickets_list(cb: CallbackQuery):
     if nav:
         kb.append(nav)
     kb.append([InlineKeyboardButton(text="↩️ بازگشت", callback_data="admin")])
-    await cb.message.edit_text("تیکت‌ها:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    body = "تیکت‌ها:\n" + ("\n".join(lines) if lines else "موردی نیست.")
+    await cb.message.edit_text(body, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data.regexp(r"^adm:tkt:view:(\d+):(\d+)$"))
@@ -237,19 +276,29 @@ async def admin_ticket_view(cb: CallbackQuery):
     tid = int(m.group(1))
     page = int(m.group(2))
     size = 10
-    ticket_row = cur.execute("SELECT user_id,status FROM tickets WHERE id=?", (tid,)).fetchone()
+    ticket_row = cur.execute(
+        "SELECT t.user_id,t.status,u.username,u.first_name,u.last_name FROM tickets t LEFT JOIN users u ON u.user_id=t.user_id WHERE t.id=?",
+        (tid,),
+    ).fetchone()
     uid = ticket_row["user_id"] if ticket_row else "-"
     status = ticket_row["status"] if ticket_row else "?"
+    username = ticket_row["username"] if ticket_row else None
+    full_name = None
+    if ticket_row:
+        fn = ticket_row["first_name"] or ""
+        ln = ticket_row["last_name"] or ""
+        full_name = (fn + " " + ln).strip() or None
+    mention = format_identity(uid, username, full_name or str(uid))
     rows, total = list_ticket_messages_page(tid, page, size)
-    header = f"#T{tid} | UID:{uid} | وضعیت: {status}"
+    header = f"#T{tid} | UID:{uid} | کاربر: {mention} | وضعیت: {status}"
     if not rows:
         text = header + "\nپیامی در این صفحه نیست."
     else:
         lines = []
         for r in rows:
-            who = "کاربر" if r["sender_type"] == "user" else "پشتیبان"
-            body = r.get("content") or r.get("caption") or ""
-            lines.append(f"[{r['id']}] {who} ({r['sender_id']}): {htmlesc(body)}")
+            who = "کاربر" if r.get("sender_role") == "user" else "پشتیبان"
+            body = r.get("text") or r.get("media_json") or ""
+            lines.append(f"[{r['id']}] {who} ({r.get('sender_id')}): {htmlesc(body)}")
         text = header + "\n" + "\n".join(lines)
     kb = []
     nav = []
@@ -266,8 +315,13 @@ async def admin_ticket_view(cb: CallbackQuery):
         ]
     )
     kb.append([InlineKeyboardButton(text="📋 کپی آیدی", callback_data=f"adm:tkt:uid:{tid}")])
+    try:
+        uid_int = int(uid)
+        kb.append([InlineKeyboardButton(text="👤 پروفایل کاربر", url=f"tg://user?id={uid_int}")])
+    except Exception:
+        pass
     kb.append([InlineKeyboardButton(text="↩️ بازگشت", callback_data="admin:tickets:0")])
-    await cb.message.edit_text(text or "پیامی در این صفحه نیست.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    await cb.message.edit_text(text or "پیامی در این صفحه نیست.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data.regexp(r"^adm:tkt:uid:(\d+)$"))
@@ -333,22 +387,82 @@ async def admin_reply_dispatch(m: Message, state: FSMContext):
     try:
         if m.photo:
             sent = await m.bot.send_photo(uid, m.photo[-1].file_id, caption=m.caption or "", reply_markup=kb_user_reply(tid))
-            store_tmsg(tid, "admin", m.from_user.id, "photo", m.photo[-1].file_id, m.caption or "", sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "photo",
+                m.photo[-1].file_id,
+                m.caption or "",
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         elif m.document:
             sent = await m.bot.send_document(uid, m.document.file_id, caption=m.caption or "", reply_markup=kb_user_reply(tid))
-            store_tmsg(tid, "admin", m.from_user.id, "document", m.document.file_id, m.caption or "", sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "document",
+                m.document.file_id,
+                m.caption or "",
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         elif m.voice:
             sent = await m.bot.send_voice(uid, m.voice.file_id, caption=m.caption or "", reply_markup=kb_user_reply(tid))
-            store_tmsg(tid, "admin", m.from_user.id, "voice", m.voice.file_id, m.caption or "", sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "voice",
+                m.voice.file_id,
+                m.caption or "",
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         elif m.video:
             sent = await m.bot.send_video(uid, m.video.file_id, caption=m.caption or "", reply_markup=kb_user_reply(tid))
-            store_tmsg(tid, "admin", m.from_user.id, "video", m.video.file_id, m.caption or "", sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "video",
+                m.video.file_id,
+                m.caption or "",
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         elif m.sticker:
             sent = await m.bot.send_sticker(uid, m.sticker.file_id)
-            store_tmsg(tid, "admin", m.from_user.id, "sticker", m.sticker.file_id, None, sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "sticker",
+                m.sticker.file_id,
+                None,
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         else:
             sent = await m.bot.send_message(uid, m.text or "", reply_markup=kb_user_reply(tid))
-            store_tmsg(tid, "admin", m.from_user.id, "text", m.text or "", None, sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "text",
+                m.text or "",
+                None,
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         await m.reply("پیام ارسال شد.")
     except Exception:
         await m.reply("ارسال پیام به کاربر با خطا مواجه شد.")
@@ -374,23 +488,83 @@ async def group_ticket_reply(m: Message):
     try:
         if m.photo:
             sent = await m.bot.send_photo(uid, m.photo[-1].file_id, caption=f"{prefix}\n{m.caption or ''}", reply_markup=kb_user_reply(tid))
-            store_tmsg(tid, "admin", m.from_user.id, "photo", m.photo[-1].file_id, m.caption or "", sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "photo",
+                m.photo[-1].file_id,
+                m.caption or "",
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         elif m.document:
             sent = await m.bot.send_document(uid, m.document.file_id, caption=f"{prefix}\n{m.caption or ''}", reply_markup=kb_user_reply(tid))
-            store_tmsg(tid, "admin", m.from_user.id, "document", m.document.file_id, m.caption or "", sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "document",
+                m.document.file_id,
+                m.caption or "",
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         elif m.voice:
             sent = await m.bot.send_voice(uid, m.voice.file_id, caption=prefix, reply_markup=kb_user_reply(tid))
-            store_tmsg(tid, "admin", m.from_user.id, "voice", m.voice.file_id, None, sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "voice",
+                m.voice.file_id,
+                None,
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         elif m.video:
             sent = await m.bot.send_video(uid, m.video.file_id, caption=f"{prefix}\n{m.caption or ''}", reply_markup=kb_user_reply(tid))
-            store_tmsg(tid, "admin", m.from_user.id, "video", m.video.file_id, m.caption or "", sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "video",
+                m.video.file_id,
+                m.caption or "",
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         elif m.sticker:
             sent = await m.bot.send_sticker(uid, m.sticker.file_id)
-            store_tmsg(tid, "admin", m.from_user.id, "sticker", m.sticker.file_id, None, sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "sticker",
+                m.sticker.file_id,
+                None,
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
         else:
             text = m.text or m.caption or ""
             sent = await m.bot.send_message(uid, f"{prefix}\n{text}", reply_markup=kb_user_reply(tid))
-            store_tmsg(tid, "admin", m.from_user.id, "text", text, None, sent.message_id)
+            store_tmsg(
+                tid,
+                "admin",
+                m.from_user.id,
+                "text",
+                text,
+                None,
+                sent.message_id,
+                src_chat_id=m.chat.id,
+                src_message_id=m.message_id,
+            )
     except Exception:
         pass
 

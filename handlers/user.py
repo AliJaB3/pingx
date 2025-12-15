@@ -40,7 +40,16 @@ from db import (
     inc_referral_signup,
 )
 from keyboards import kb_main, kb_force_join, kb_plans, kb_mysubs, kb_sub_detail
-from utils import htmlesc, progress_bar, human_bytes, qr_bytes, safe_name_from_user, parse_channel_list, fetch_channel_details
+from utils import (
+    htmlesc,
+    progress_bar,
+    human_bytes,
+    qr_bytes,
+    safe_name_from_user,
+    parse_channel_list,
+    fetch_channel_details,
+    format_toman,
+)
 from xui import three_session
 
 TZ = timezone.utc
@@ -199,7 +208,7 @@ async def start(m: Message):
     bal = db_get_wallet(m.from_user.id)
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     await m.answer(
-        welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
+        welcome + f"\n\n💰 موجودی کیف پول: <b>{format_toman(bal)}</b>",
         reply_markup=_kb_main_for(m.from_user.id),
         parse_mode=ParseMode.HTML,
     )
@@ -212,7 +221,7 @@ async def home(cb: CallbackQuery):
     bal = db_get_wallet(cb.from_user.id)
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     await cb.message.edit_text(
-        welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
+        welcome + f"\n\n💰 موجودی کیف پول: <b>{format_toman(bal)}</b>",
         reply_markup=_kb_main_for(cb.from_user.id),
         parse_mode=ParseMode.HTML,
     )
@@ -250,10 +259,10 @@ async def plan_select(cb: CallbackQuery):
         )
         await cb.message.edit_text(
             "⚠️ موجودی کیف پول برای این خرید کافی نیست:\n"
-            f"• مبلغ پلن: <b>{price:,}</b> تومان"
-            + (f" (با تخفیف {discount_pct}% از {orig_price:,})" if discount_pct else "")
+            f"• مبلغ پلن: <b>{format_toman(price)}</b>"
+            + (f" (با تخفیف {discount_pct}% از {format_toman(orig_price)})" if discount_pct else "")
             + "\n"
-            f"• موجودی فعلی: <b>{bal:,}</b> تومان",
+            f"• موجودی فعلی: <b>{format_toman(bal)}</b>",
             reply_markup=kb,
             parse_mode=ParseMode.HTML,
         )
@@ -265,8 +274,8 @@ async def plan_select(cb: CallbackQuery):
         ]
     )
     await cb.message.edit_text(
-        f"🛒 پلن انتخابی: <b>{plan['title']}</b>\n💵 مبلغ: <b>{price:,}</b> تومان"
-        + (f" (با تخفیف {discount_pct}% از {orig_price:,})" if discount_pct else "")
+        f"🛒 پلن انتخابی: <b>{plan['title']}</b>\n💵 مبلغ: <b>{format_toman(price)}</b>"
+        + (f" (با تخفیف {discount_pct}% از {format_toman(orig_price)})" if discount_pct else "")
         + "\nآیا تایید می‌کنی؟",
         reply_markup=kb,
         parse_mode=ParseMode.HTML,
@@ -441,7 +450,7 @@ async def sub_detail(cb: CallbackQuery):
         total_hr = "نامحدود" if total <= 0 else human_bytes(total)
         usage_txt = f"📊 مصرف: {human_bytes(used)} / {total_hr}\n{bar}\n⏰ انقضا: {exp_txt}"
     text = f"<b>اشتراک #{r['id']}</b>\n"
-    text += f"پلن: {htmlesc(r['plan_id'])} | مبلغ: {r['price']:,} تومان\n"
+    text += f"پلن: {htmlesc(r['plan_id'])} | مبلغ: {format_toman(r['price'])}\n"
     if usage_txt:
         text += usage_txt
     await cb.message.edit_text(text, reply_markup=kb_sub_detail(pid), parse_mode=ParseMode.HTML)
@@ -529,7 +538,7 @@ async def recheck_join(cb: CallbackQuery):
     bal = db_get_wallet(cb.from_user.id)
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     await cb.message.edit_text(
-        welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
+        welcome + f"\n\n💰 موجودی کیف پول: <b>{format_toman(bal)}</b>",
         reply_markup=_kb_main_for(cb.from_user.id),
         parse_mode=ParseMode.HTML,
     )
@@ -551,7 +560,7 @@ async def fallback_main_menu(m: Message):
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدید!")
     logger.info("Fallback main menu uid=%s state=None text=%s", m.from_user.id, (m.text or "")[:200])
     await m.answer(
-        welcome + f"\n\n💰 موجودی فعلی شما: <b>{bal:,}</b> تومان",
+        welcome + f"\n\n💰 موجودی فعلی شما: <b>{format_toman(bal)}</b>",
         reply_markup=_kb_main_for(m.from_user.id),
         parse_mode=ParseMode.HTML,
     )
