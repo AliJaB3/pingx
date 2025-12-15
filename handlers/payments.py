@@ -6,10 +6,13 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 
-from config import CARD_NUMBER, MAX_RECEIPT_PHOTOS, MAX_RECEIPT_MB, PAGE_SIZE_PAYMENTS
+from config import CARD_NUMBER, MAX_RECEIPT_PHOTOS, MAX_RECEIPT_MB, PAGE_SIZE_PAYMENTS, SUPPORT_GROUP_ID, TICKET_GROUP_ID
 from db import (
     is_admin,
+    is_staff,
+    is_support,
     get_admin_ids,
+    get_support_ids,
     db_get_wallet,
     db_new_payment,
     db_get_payment,
@@ -43,6 +46,15 @@ def _runtime_max_mb() -> int:
         return val if val > 0 else MAX_RECEIPT_MB
     except Exception:
         return MAX_RECEIPT_MB
+
+
+def _card_note() -> str:
+    card = _runtime_card_number()
+    return f"\n\n💳 شماره کارت: <code>{htmlesc(card)}</code>" if card else ""
+
+
+def _with_card_info(text: str) -> str:
+    return (text or "") + _card_note()
 
 
 class Topup(StatesGroup):
@@ -118,24 +130,35 @@ async def _submit_topup_request(bot, user, amount, media, notes):
         len(media),
         len(note_txt),
     )
-    action_kb = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="مشاهده رسید", callback_data=f"payview:{pid}")]]
+    action_kb = _kb_payment_actions(pid, include_back=False)
+    summary = (
+        f"رسید واریز #{pid}\n"
+        f"کاربر: <a href=\"tg://user?id={user.id}\">{htmlesc(user.full_name or user.username or str(user.id))}</a>\n"
+        f"آیدی: {user.id}\n"
+        f"مبلغ: {amount:,}"
     )
-    for aid in get_admin_ids():
+    if note_txt:
+        summary += f"\nتوضیحات: {htmlesc(note_txt)}"
+
+    recipients = set(get_admin_ids()).union(get_support_ids())
+    target_group = SUPPORT_GROUP_ID or TICKET_GROUP_ID or None
+
+    async def _send_to(target_id):
         try:
-            base_msg = (
-                f"پرداخت جدید #{pid}\n"
-                f"از <a href=\"tg://user?id={user.id}\">{htmlesc(user.full_name or user.username or str(user.id))}</a>\n"
-                f"مبلغ: {amount:,}"
-            )
-            if note_txt:
-                base_msg += f"\nتوضیحات: {htmlesc(note_txt)}"
-            await bot.send_message(aid, base_msg, parse_mode=ParseMode.HTML)
-            for item in media:
-                await _send_media(bot, aid, item, caption=f"رسید #{pid}")
-            await bot.send_message(aid, "اقدام:", reply_markup=action_kb)
+            if media:
+                for idx, item in enumerate(media):
+                    caption = summary if idx == 0 else None
+                    markup = action_kb if idx == 0 else None
+                    await _send_media(bot, target_id, item, caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
+            else:
+                await bot.send_message(target_id, summary, parse_mode=ParseMode.HTML, reply_markup=action_kb)
         except Exception:
-            continue
+            logger.warning("Send receipt notify failed chat=%s pid=%s", target_id, pid, exc_info=True)
+
+    for rid in recipients:
+        await _send_to(rid)
+    if target_group:
+        await _send_to(target_group)
     return pid, note_txt
 
 
@@ -155,17 +178,15 @@ async def wallet(cb: CallbackQuery):
 async def topup_start(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await state.set_state(Topup.amount)
-    card_number = _runtime_card_number()
     max_photos = _runtime_max_photos()
     max_mb = _runtime_max_mb()
     msg = (
         "<b>🔼 افزایش موجودی</b>\n"
         "یک مبلغ را از دکمه‌ها انتخاب کن.\n"
         "بعد رسید یا توضیحات را بفرست؛ به محض دریافت اولین عکس، درخواست به‌صورت خودکار ثبت می‌شود.\n\n"
-        f"💳 کارت مقصد: <code>{card_number}</code>\n"
         f"🖼 حداکثر عکس: {max_photos} | 📏 حداکثر حجم هر عکس: {max_mb}MB"
     )
-    await cb.message.edit_text(msg, reply_markup=_kb_amounts(), parse_mode=ParseMode.HTML)
+    await cb.message.edit_text(_with_card_info(msg), reply_markup=_kb_amounts(), parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data.startswith("topamt:"))
@@ -173,8 +194,9 @@ async def topup_select_amount(cb: CallbackQuery, state: FSMContext):
     if cb.data == "topamt:custom":
         await state.set_state(Topup.amount)
         await cb.message.edit_text(
-            "مبلغ موردنظر خود را به تومان با عدد ارسال کن.",
+            _with_card_info("مبلغ موردنظر خود را به تومان با عدد ارسال کن."),
             reply_markup=_kb_custom_amount(),
+            parse_mode=ParseMode.HTML,
         )
         return
     try:
@@ -185,8 +207,9 @@ async def topup_select_amount(cb: CallbackQuery, state: FSMContext):
     await state.set_state(Topup.note)
     logger.info("Topup amount set uid=%s amount=%s", cb.from_user.id, amount)
     await cb.message.edit_text(
-        f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\n"
-        "رسید/توضیحات را بفرست؛ پس از دریافت عکس، درخواست به‌صورت خودکار ثبت می‌شود.",
+        _with_card_info(
+            f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\nرسید/توضیحات را بفرست؛ پس از دریافت عکس، درخواست به‌صورت خودکار ثبت می‌شود."
+        ),
         reply_markup=_kb_amount_selected(),
         parse_mode=ParseMode.HTML,
     )
@@ -209,11 +232,11 @@ async def _handle_receipt_upload(
     media = list(data.get("media", []))
     max_mb = _runtime_max_mb()
     if file_size and file_size > int(max_mb) * 1024 * 1024:
-        await m.reply("⚠️ حجم این فایل از حد مجاز بیشتر است.", reply_markup=_kb_receipt_flow())
+        await m.reply(_with_card_info("⚠️ حجم این فایل از حد مجاز بیشتر است."), reply_markup=_kb_receipt_flow(), parse_mode=ParseMode.HTML)
         return
     max_photos = _runtime_max_photos()
     if len(media) >= max_photos:
-        await m.reply("⚠️ تعداد فایل بیش از حد مجاز است.", reply_markup=_kb_receipt_flow())
+        await m.reply(_with_card_info("⚠️ تعداد فایل بیش از حد مجاز است."), reply_markup=_kb_receipt_flow(), parse_mode=ParseMode.HTML)
         return
     media.append({"kind": file_kind, "file_id": file_id})
     if caption_text:
@@ -221,7 +244,7 @@ async def _handle_receipt_upload(
     await state.clear()
     pid, _ = await _submit_topup_request(m.bot, m.from_user, amount, media, notes)
     await m.reply(
-        f"✅ رسید دریافت شد و با شماره #{pid} برای بررسی ارسال شد.",
+        _with_card_info(f"✅ رسید دریافت شد و با شماره #{pid} برای بررسی ارسال شد."),
         reply_markup=_topup_main_keyboard(),
         parse_mode=ParseMode.HTML,
     )
@@ -271,7 +294,11 @@ async def topup_collect(m: Message, state: FSMContext):
     if note:
         notes.append(note)
         await state.update_data(notes=notes)
-        await m.reply("📝 توضیح ثبت شد. رسید را ارسال کن تا درخواست به‌صورت خودکار ثبت شود.", reply_markup=_kb_amount_selected())
+        await m.reply(
+            _with_card_info("📝 توضیح ثبت شد. رسید را ارسال کن تا درخواست به‌صورت خودکار ثبت شود."),
+            reply_markup=_kb_amount_selected(),
+            parse_mode=ParseMode.HTML,
+        )
 
 
 @router.message(StateFilter(Topup.amount))
@@ -280,15 +307,16 @@ async def topup_amount_manual(m: Message, state: FSMContext):
     try:
         amount = int(txt)
     except Exception:
-        return await m.reply("لطفاً مبلغ را فقط با اعداد ارسال کن.")
+        return await m.reply(_with_card_info("لطفاً مبلغ را فقط با اعداد ارسال کن."), parse_mode=ParseMode.HTML)
     if amount <= 0:
-        return await m.reply("مبلغ باید بزرگ‌تر از صفر باشد.")
+        return await m.reply(_with_card_info("مبلغ باید بزرگ‌تر از صفر باشد."), parse_mode=ParseMode.HTML)
     await state.update_data(amount=amount, media=[], notes=[])
     await state.set_state(Topup.note)
     logger.info("Topup custom amount set uid=%s amount=%s", m.from_user.id, amount)
     await m.reply(
-        f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\n"
-        "رسید/توضیحات را بفرست؛ پس از دریافت عکس، درخواست به‌صورت خودکار ثبت می‌شود.",
+        _with_card_info(
+            f"مبلغ انتخاب شد: <b>{amount:,}</b> تومان\nرسید/توضیحات را بفرست؛ پس از دریافت عکس، درخواست به‌صورت خودکار ثبت می‌شود."
+        ),
         reply_markup=_kb_amount_selected(),
         parse_mode=ParseMode.HTML,
     )
@@ -309,7 +337,7 @@ def _topup_main_keyboard():
 
 @router.callback_query(F.data.regexp(r"^admin:pending:(\d+)$"))
 async def admin_pending(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not is_staff(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
     page = int(re.match(r"^admin:pending:(\d+)$", cb.data).group(1))
     size = PAGE_SIZE_PAYMENTS
@@ -330,19 +358,32 @@ async def admin_pending(cb: CallbackQuery):
     await cb.message.edit_text("پرداخت‌های در انتظار بررسی:", reply_markup=kb)
 
 
-def kb(pid: int):
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="✅ تایید و شارژ", callback_data=f"payok:{pid}")],
-            [InlineKeyboardButton(text="✖️ رد پرداخت", callback_data=f"payno:{pid}")],
-            [InlineKeyboardButton(text="↩️ بازگشت", callback_data="admin:pending:0")],
-        ]
-    )
+def _kb_payment_actions(pid: int, include_back: bool = True):
+    rows = [
+        [InlineKeyboardButton(text="✅ تایید و شارژ", callback_data=f"payok:{pid}")],
+        [InlineKeyboardButton(text="✖️ رد پرداخت", callback_data=f"payno:{pid}")],
+    ]
+    if include_back:
+        rows.append([InlineKeyboardButton(text="↩️ بازگشت", callback_data="admin:pending:0")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _annotate_payment_message(cb: CallbackQuery, note: str):
+    try:
+        if cb.message.caption is not None:
+            await cb.message.edit_caption(f"{cb.message.caption}\n{note}", reply_markup=None)
+        else:
+            await cb.message.edit_text(f"{cb.message.text}\n{note}", reply_markup=None)
+    except Exception:
+        try:
+            await cb.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data.regexp(r"^payview:(\d+)$"))
 async def admin_pay_view(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not is_staff(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
     pid = int(re.match(r"^payview:(\d+)$", cb.data).group(1))
     r = db_get_payment(pid)
@@ -367,15 +408,15 @@ async def admin_pay_view(cb: CallbackQuery):
             pass
         for i, item in enumerate(media):
             caption = text if i == 0 else None
-            markup = kb(pid) if i == 0 else None
+            markup = _kb_payment_actions(pid) if i == 0 else None
             await _send_media(cb.bot, cb.from_user.id, item, caption=caption, parse_mode=ParseMode.HTML, reply_markup=markup)
     else:
-        await cb.message.edit_text(text, reply_markup=kb(pid), parse_mode=ParseMode.HTML)
+        await cb.message.edit_text(text, reply_markup=_kb_payment_actions(pid), parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data.regexp(r"^payok:(\d+)$"))
 async def admin_pay_ok(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not is_staff(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
     pid = int(re.match(r"^payok:(\d+)$", cb.data).group(1))
     r = db_get_payment(pid)
@@ -393,22 +434,33 @@ async def admin_pay_ok(cb: CallbackQuery):
         await cb.bot.send_message(r["user_id"], f"پرداخت شما به مبلغ {r['amount']:,} تایید شد و به کیف پولتان اضافه شد.")
     except Exception:
         pass
+    actor_label = cb.from_user.full_name or cb.from_user.username or cb.from_user.id
+    await _annotate_payment_message(cb, f"✅ تایید توسط {actor_label}")
     await cb.answer("پرداخت تایید شد.")
-    await admin_pending(cb)
+    if getattr(cb.message, "chat", None) and getattr(cb.message.chat, "type", "") == "private":
+        await admin_pending(cb)
 
 
 @router.callback_query(F.data.regexp(r"^payno:(\d+)$"))
 async def admin_pay_no(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not is_staff(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
     pid = int(re.match(r"^payno:(\d+)$", cb.data).group(1))
     r = db_get_payment(pid)
     if not r:
         return await cb.answer("درخواست پیدا نشد", show_alert=True)
+    status = (r.get("status") or "").lower()
+    if status == "approved":
+        return await cb.answer("این پرداخت قبلاً تایید شده است.", show_alert=True)
+    if status == "rejected":
+        return await cb.answer("این پرداخت قبلاً رد شده است.", show_alert=True)
     db_update_payment_status(pid, "rejected")
     try:
         await cb.bot.send_message(r["user_id"], "پرداخت شما تایید نشد. لطفاً مجدد ارسال کنید یا با پشتیبانی در تماس باشید.")
     except Exception:
         pass
+    actor_label = cb.from_user.full_name or cb.from_user.username or cb.from_user.id
+    await _annotate_payment_message(cb, f"❌ رد توسط {actor_label}")
     await cb.answer("پرداخت رد شد.")
-    await admin_pending(cb)
+    if getattr(cb.message, "chat", None) and getattr(cb.message.chat, "type", "") == "private":
+        await admin_pending(cb)

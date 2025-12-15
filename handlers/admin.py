@@ -1,6 +1,6 @@
 ﻿import re, json, secrets
 import os, sqlite3, tempfile, zipfile, shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from aiogram import Router, F
 from aiogram.enums import ParseMode
@@ -9,18 +9,39 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 
-from db import is_admin, get_admin_ids, conn
+from db import is_admin, get_admin_ids, conn, is_support, is_staff
 from keyboards import kb_admin_root
 from db import (
     cur,
-    get_setting, set_setting,
-    db_get_plan, db_get_plans_for_user,
-    user_purchases, cache_get_usage,
-    db_get_wallet, db_add_wallet, log_evt,
-    db_list_plans, db_insert_plan, db_update_plan_field, db_delete_plan,
-    create_referral, list_referrals, get_referral, update_referral_title, update_referral_description, list_referral_joiners,
+    get_setting,
+    set_setting,
+    db_get_plan,
+    db_get_plans_for_user,
+    user_purchases,
+    cache_get_usage,
+    db_get_wallet,
+    db_add_wallet,
+    log_evt,
+    db_list_plans,
+    db_insert_plan,
+    db_update_plan_field,
+    db_delete_plan,
+    db_swap_plan_order,
+    create_referral,
+    list_referrals,
+    get_referral,
+    update_referral_title,
+    update_referral_description,
+    list_referral_joiners,
+    get_support_ids,
+    add_support,
+    remove_support,
+    count_users,
+    purchases_stats_range,
+    events_count,
+    get_global_discount_percent,
 )
-from utils import htmlesc, human_bytes, parse_channel_list
+from utils import htmlesc, human_bytes, parse_channel_list, TZ
 from xui import three_session
 from config import THREEXUI_INBOUND_ID, PAGE_SIZE_USERS, DB_PATH
 
@@ -46,6 +67,14 @@ class RefEdit(StatesGroup):
 
 class BackupRestore(StatesGroup):
     restore_waiting = State()
+
+
+class SupportAdd(StatesGroup):
+    waiting = State()
+
+
+class DiscountEdit(StatesGroup):
+    waiting = State()
 
 
 def _generate_ref_code():
@@ -128,7 +157,7 @@ async def admin_restore_cancel(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
     await state.clear()
-    await cb.message.edit_text("پنل ادمین:", reply_markup=kb_admin_root())
+    await cb.message.edit_text("پنل ادمین:", reply_markup=kb_admin_root(is_admin=True))
 
 
 @router.message(StateFilter(BackupRestore.restore_waiting))
@@ -166,7 +195,7 @@ async def admin_restore_file(m: Message, state: FSMContext):
 
         safety = _backup_live_db()
         _restore_into_live(db_source)
-        await m.answer(f"ریستور انجام شد. نسخه فعلی قبل از ریستور در {safety} ذخیره شد.", reply_markup=kb_admin_root())
+        await m.answer(f"ریستور انجام شد. نسخه فعلی قبل از ریستور در {safety} ذخیره شد.", reply_markup=kb_admin_root(is_admin=True))
         await state.clear()
     except Exception as e:
         await m.answer(f"ریستور با خطا مواجه شد: {e}")
@@ -184,9 +213,126 @@ def kb_admin_refs(rows):
 
 @router.callback_query(F.data == "admin")
 async def admin_menu(cb: CallbackQuery):
+    if not is_staff(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    is_adm = is_admin(cb.from_user.id)
+    is_sup = is_support(cb.from_user.id)
+    title = "پنل ادمین:" if is_adm else "پنل پشتیبان:"
+    await cb.message.edit_text(title, reply_markup=kb_admin_root(is_admin=is_adm, is_support=is_sup))
+
+
+def kb_supports(ids):
+    kb = [[InlineKeyboardButton(text=str(sid), callback_data=f"admin:supports:del:{sid}")] for sid in sorted(ids)]
+    kb.append([InlineKeyboardButton(text="➕ افزودن پشتیبان", callback_data="admin:supports:add")])
+    kb.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+@router.callback_query(F.data == "admin:supports")
+async def admin_supports(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز", show_alert=True)
-    await cb.message.edit_text("پنل ادمین:", reply_markup=kb_admin_root())
+    if await state.get_state():
+        await state.clear()
+    ids = get_support_ids()
+    text = "🧑‍💻 پشتیبان‌های فعلی:\n" + ("\n".join(str(x) for x in sorted(ids)) if ids else "هنوز کسی اضافه نشده است.")
+    await cb.message.edit_text(text, reply_markup=kb_supports(ids))
+
+
+@router.callback_query(F.data == "admin:supports:add")
+async def admin_supports_add(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    await state.set_state(SupportAdd.waiting)
+    await cb.message.edit_text(
+        "آیدی عددی کاربر را ارسال کنید:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:supports")]]),
+    )
+
+
+@router.message(StateFilter(SupportAdd.waiting))
+async def admin_supports_add_recv(m: Message, state: FSMContext):
+    if not is_admin(m.from_user.id):
+        await m.answer("دسترسی غیرمجاز")
+        return await state.clear()
+    try:
+        uid = int((m.text or "").strip())
+        if uid <= 0:
+            raise ValueError("invalid")
+    except Exception:
+        return await m.reply("آیدی معتبر نیست.")
+    add_support(uid)
+    await state.clear()
+    await m.reply(f"پشتیبان {uid} اضافه شد.", reply_markup=kb_supports(get_support_ids()))
+
+
+@router.callback_query(F.data.regexp(r"^admin:supports:del:(\d+)$"))
+async def admin_supports_del(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    uid = int(re.match(r"^admin:supports:del:(\d+)$", cb.data).group(1))
+    remove_support(uid)
+    ids = get_support_ids()
+    text = "🧑‍💻 پشتیبان‌های فعلی:\n" + ("\n".join(str(x) for x in sorted(ids)) if ids else "هنوز کسی اضافه نشده است.")
+    await cb.message.edit_text(text, reply_markup=kb_supports(ids))
+
+
+def kb_reports():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="امروز", callback_data="admin:reports:1")],
+            [InlineKeyboardButton(text="۷ روز اخیر", callback_data="admin:reports:7")],
+            [InlineKeyboardButton(text="۳۰ روز اخیر", callback_data="admin:reports:30")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")],
+        ]
+    )
+
+
+def _report_range_bounds(days: int):
+    now = datetime.now(TZ)
+    if days <= 1:
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, now
+
+
+@router.callback_query(F.data == "admin:reports")
+async def admin_reports(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    await cb.message.edit_text("بازه گزارش را انتخاب کنید:", reply_markup=kb_reports())
+
+
+@router.callback_query(F.data.regexp(r"^admin:reports:(1|7|30)$"))
+async def admin_reports_range(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    days = int(re.match(r"^admin:reports:(1|7|30)$", cb.data).group(1))
+    start, end = _report_range_bounds(days)
+    start_iso, end_iso = start.isoformat(), end.isoformat()
+    stats = purchases_stats_range(start_iso, end_iso)
+    revenue = stats.get("revenue", 0)
+    orders = stats.get("orders", 0)
+    buyers = stats.get("buyers", 0)
+    aov = (revenue / orders) if orders else 0
+    total_users = count_users()
+    conversion = (buyers / total_users * 100) if total_users else 0
+    checkout = events_count("checkout_initiated", start_iso, end_iso)
+    success = events_count("purchase_success", start_iso, end_iso)
+    funnel = (success / checkout * 100) if checkout else 0
+    labels = {1: "امروز", 7: "۷ روز اخیر", 30: "۳۰ روز اخیر"}
+    lines = [
+        f"🗓 بازه: {labels.get(days, days)}",
+        f"💰 درآمد: {revenue:,} تومان",
+        f"🧾 سفارشات: {orders:,}",
+        f"🛍 خریداران یونیک: {buyers:,}",
+        f"💳 AOV: {int(aov):,} تومان" if aov else "💳 AOV: 0",
+        f"🎯 کانورژن ساده: {conversion:.1f}%",
+        f"📊 قیف خرید: {funnel:.1f}% (purchase_success / checkout_initiated)",
+        f"رویدادها: checkout_initiated={checkout:,} | purchase_success={success:,}",
+    ]
+    await cb.message.edit_text("\n".join(lines), reply_markup=kb_reports())
 
 
 @router.callback_query(F.data == "admin:refs")
@@ -569,7 +715,7 @@ async def admin_plans(cb: CallbackQuery, state: FSMContext):
         kb.append(
             [
                 InlineKeyboardButton(
-                    text=f"{p['id']} | {p['title']} | {p['price']:,}",
+                    text=f"[{p.get('sort_order')}] {p['id']} | {p['title']} | {p['price']:,}",
                     callback_data=f"admin2:plan:{p['id']}",
                 )
             ]
@@ -626,6 +772,10 @@ def kb_plan_detail(p: dict):
     test = bool(flags.get("test"))
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⬆️ بالا", callback_data=f"admin2:plan:move:{p['id']}:up"),
+                InlineKeyboardButton(text="⬇️ پایین", callback_data=f"admin2:plan:move:{p['id']}:down"),
+            ],
             [InlineKeyboardButton(text="Edit Title", callback_data=f"admin2:plan:edit:{p['id']}:title")],
             [
                 InlineKeyboardButton(text="Edit Days", callback_data=f"admin2:plan:edit:{p['id']}:days"),
@@ -662,6 +812,7 @@ async def admin_plan_view(cb: CallbackQuery, state: FSMContext):
         return await cb.answer("Plan not found")
     txt = (
         f"<b>Plan {htmlesc(p['id'])}</b>\n"
+        f"Sort: {p.get('sort_order')}\n"
         f"Title: {htmlesc(p['title'])}\n"
         f"Days: {p['days']}\n"
         f"GB: {p['gb']}\n"
@@ -734,6 +885,19 @@ async def admin_plan_toggle_flag(cb: CallbackQuery, state: FSMContext):
     await admin_plan_view(cb, state)
 
 
+@router.callback_query(F.data.regexp(r"^admin2:plan:move:([^:]+):(up|down)$"))
+async def admin_plan_move(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    m = re.match(r"^admin2:plan:move:([^:]+):(up|down)$", cb.data)
+    pid = m.group(1)
+    direction = m.group(2)
+    ok = db_swap_plan_order(pid, direction)
+    if not ok:
+        await cb.answer("جابجایی ممکن نیست.", show_alert=True)
+    await admin_plan_view(cb, state)
+
+
 @router.callback_query(F.data.regexp(r"^admin2:plan:del:([^:]+)$"))
 async def admin_plan_delete(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
@@ -741,6 +905,57 @@ async def admin_plan_delete(cb: CallbackQuery, state: FSMContext):
     pid = re.match(r"^admin2:plan:del:([^:]+)$", cb.data).group(1)
     db_delete_plan(pid)
     await admin_plans(cb, state)
+
+
+# --- Global discount ---
+
+
+@router.callback_query(F.data == "admin:discount")
+async def admin_discount(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    if await state.get_state() == DiscountEdit.waiting.state:
+        await state.clear()
+    pct = get_global_discount_percent()
+    text = f"🎁 تخفیف سراسری فعلی: {pct}%"
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="تنظیم درصد", callback_data="admin:discount:set")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")],
+        ]
+    )
+    await cb.message.edit_text(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "admin:discount:set")
+async def admin_discount_set(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    await state.set_state(DiscountEdit.waiting)
+    await cb.message.edit_text(
+        "درصد تخفیف را وارد کنید (۰ تا ۹۰):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:discount")]]),
+    )
+
+
+@router.message(StateFilter(DiscountEdit.waiting))
+async def admin_discount_set_value(m: Message, state: FSMContext):
+    if not is_admin(m.from_user.id):
+        await m.answer("دسترسی غیرمجاز")
+        return await state.clear()
+    raw = (m.text or "").strip().replace("%", "")
+    try:
+        val = int(raw)
+        if val < 0 or val > 90:
+            raise ValueError("range")
+    except Exception:
+        return await m.reply("یک عدد بین ۰ تا ۹۰ ارسال کنید.")
+    set_setting("GLOBAL_DISCOUNT_PERCENT", str(val))
+    await state.clear()
+    await m.reply(
+        f"تخفیف سراسری روی {val}% تنظیم شد.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:discount")]]),
+    )
 
 
 # --- Templates management ---
@@ -1236,4 +1451,3 @@ async def admin_dashboard(cb:CallbackQuery):
         f"🛰️ وضعیت این‌باندها: {ib_txt}"
     )
     await cb.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")]]))
-

@@ -8,7 +8,9 @@ from aiogram.filters import StateFilter
 
 from db import (
     is_admin,
+    is_staff,
     get_admin_ids,
+    get_support_ids,
     get_or_open_ticket,
     ticket_close,
     ticket_set_activity,
@@ -57,6 +59,7 @@ def kb_admin_reply(tid: int):
                 InlineKeyboardButton(text="🚪 بستن", callback_data=f"adm:tkt:close:{tid}"),
             ],
             [InlineKeyboardButton(text="📜 تاریخچه", callback_data=f"adm:tkt:view:{tid}:0")],
+            [InlineKeyboardButton(text="📋 کپی آیدی", callback_data=f"adm:tkt:uid:{tid}")],
         ]
     )
 
@@ -68,7 +71,7 @@ async def _forward_user_ticket_message(m: Message, tid: int):
         f"<a href=\"tg://user?id={m.from_user.id}\">{htmlesc(m.from_user.full_name or m.from_user.username or str(m.from_user.id))}</a>"
     )
     kb = kb_admin_reply(tid)
-    recipients = list(get_admin_ids())
+    recipients = list(get_admin_ids().union(get_support_ids()))
     if TICKET_GROUP_ID:
         recipients.append(TICKET_GROUP_ID)
     for aid in recipients:
@@ -103,7 +106,7 @@ async def user_support(cb: CallbackQuery, state: FSMContext):
     tid = get_or_open_ticket(cb.from_user.id)
     await state.set_state(UserTicket.waiting_first)
     await state.update_data(tid=tid)
-    recipients = list(get_admin_ids())
+    recipients = list(get_admin_ids().union(get_support_ids()))
     if TICKET_GROUP_ID:
         recipients.append(TICKET_GROUP_ID)
     for aid in recipients:
@@ -208,13 +211,13 @@ async def user_ticket_pipeline(m: Message):
 
 @router.callback_query(F.data.regexp(r"^admin:tickets:(\d+)$"))
 async def admin_tickets_list(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not is_staff(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
     page = int(re.match(r"^admin:tickets:(\d+)$", cb.data).group(1))
     rows, total = list_tickets_page(page, PAGE_SIZE_TICKETS)
     kb = []
     for r in rows:
-        kb.append([InlineKeyboardButton(text=f"#{r['id']} | {r['status']}", callback_data=f"adm:tkt:view:{r['id']}:0")])
+        kb.append([InlineKeyboardButton(text=f"#T{r['id']} | UID:{r.get('user_id')} | {r['status']}", callback_data=f"adm:tkt:view:{r['id']}:0")])
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="⬅️ قبلی", callback_data=f"admin:tickets:{page-1}"))
@@ -228,22 +231,26 @@ async def admin_tickets_list(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^adm:tkt:view:(\d+):(\d+)$"))
 async def admin_ticket_view(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not is_staff(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
     m = re.match(r"^adm:tkt:view:(\d+):(\d+)$", cb.data)
     tid = int(m.group(1))
     page = int(m.group(2))
     size = 10
+    ticket_row = cur.execute("SELECT user_id,status FROM tickets WHERE id=?", (tid,)).fetchone()
+    uid = ticket_row["user_id"] if ticket_row else "-"
+    status = ticket_row["status"] if ticket_row else "?"
     rows, total = list_ticket_messages_page(tid, page, size)
+    header = f"#T{tid} | UID:{uid} | وضعیت: {status}"
     if not rows:
-        text = "پیامی در این صفحه نیست."
+        text = header + "\nپیامی در این صفحه نیست."
     else:
         lines = []
         for r in rows:
-            who = "کاربر" if r["sender_type"] == "user" else "ادمین"
+            who = "کاربر" if r["sender_type"] == "user" else "پشتیبان"
             body = r.get("content") or r.get("caption") or ""
             lines.append(f"[{r['id']}] {who} ({r['sender_id']}): {htmlesc(body)}")
-        text = "\n".join(lines)
+        text = header + "\n" + "\n".join(lines)
     kb = []
     nav = []
     if page > 0:
@@ -258,13 +265,28 @@ async def admin_ticket_view(cb: CallbackQuery):
             InlineKeyboardButton(text="🚪 بستن", callback_data=f"adm:tkt:close:{tid}"),
         ]
     )
+    kb.append([InlineKeyboardButton(text="📋 کپی آیدی", callback_data=f"adm:tkt:uid:{tid}")])
     kb.append([InlineKeyboardButton(text="↩️ بازگشت", callback_data="admin:tickets:0")])
     await cb.message.edit_text(text or "پیامی در این صفحه نیست.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
 
+@router.callback_query(F.data.regexp(r"^adm:tkt:uid:(\d+)$"))
+async def admin_ticket_copy_uid(cb: CallbackQuery):
+    if not is_staff(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
+    tid = int(re.match(r"^adm:tkt:uid:(\d+)$", cb.data).group(1))
+    row = cur.execute("SELECT user_id FROM tickets WHERE id=?", (tid,)).fetchone()
+    uid = row["user_id"] if row else "-"
+    try:
+        await cb.message.answer(f"UID: {uid}")
+    except Exception:
+        pass
+    await cb.answer(f"UID: {uid}", show_alert=False)
+
+
 @router.callback_query(F.data.regexp(r"^adm:tkt:close:(\d+)$"))
 async def admin_ticket_close(cb: CallbackQuery):
-    if not is_admin(cb.from_user.id):
+    if not is_staff(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
     tid = int(re.match(r"^adm:tkt:close:(\d+)$", cb.data).group(1))
     row = cur.execute("SELECT user_id FROM tickets WHERE id=?", (tid,)).fetchone()
@@ -280,7 +302,7 @@ async def admin_ticket_close(cb: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^adm:tkt:reply:(\d+)$"))
 async def admin_ticket_reply(cb: CallbackQuery, state: FSMContext):
-    if not is_admin(cb.from_user.id):
+    if not is_staff(cb.from_user.id):
         return await cb.answer("دسترسی غیرمجاز است", show_alert=True)
     tid = int(re.match(r"^adm:tkt:reply:(\d+)$", cb.data).group(1))
     await state.set_state(AdminReply.waiting)
@@ -293,6 +315,9 @@ async def admin_ticket_reply(cb: CallbackQuery, state: FSMContext):
 
 @router.message(StateFilter(AdminReply.waiting))
 async def admin_reply_dispatch(m: Message, state: FSMContext):
+    if not is_staff(m.from_user.id):
+        await m.reply("دسترسی غیرمجاز است")
+        return await state.clear()
     data = await state.get_data()
     tid = data.get("tid")
     if not tid:

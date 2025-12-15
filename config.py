@@ -32,3 +32,4 @@ PAGE_SIZE_PAYMENTS = int(os.getenv("PAGE_SIZE_PAYMENTS","10"))
 PAGE_SIZE_TICKETS  = int(os.getenv("PAGE_SIZE_TICKETS","10"))
 
 TICKET_GROUP_ID = int(os.getenv("TICKET_GROUP_ID","0") or 0)
+SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID","0") or 0)

@@ -23,12 +23,18 @@ from db import (
     try_deduct_wallet,
     rollback_wallet,
     db_new_purchase,
-    user_purchases,
+    user_active_purchases,
     cache_get_usage,
+    cache_set_usage,
     set_setting,
     get_setting,
     cur,
     is_admin,
+    is_support,
+    get_active_purchase_for_inbound,
+    mark_purchase_superseded,
+    get_global_discount_percent,
+    log_event,
     user_has_test_purchase,
     inc_referral_click,
     inc_referral_signup,
@@ -52,6 +58,18 @@ def _plan_flags(plan) -> dict:
         return json.loads(plan.get("flags") or "{}")
     except Exception:
         return {}
+
+
+def _apply_discount(price: int) -> tuple[int, int]:
+    pct = get_global_discount_percent()
+    final = price
+    if pct > 0:
+        final = int(price * (100 - pct) / 100)
+    return max(final, 0), pct
+
+
+def _kb_main_for(uid: int):
+    return kb_main(uid, is_admin(uid), is_support(uid))
 
 
 async def _deliver_subscription_link(bot, uid: int, link: str):
@@ -173,6 +191,7 @@ async def start(m: Message):
     save_or_update_user(m.from_user)
     if ref_code and not existed:
         inc_referral_signup(ref_code, m.from_user)
+    log_event(m.from_user.id, "start", {})
     if not await check_force_join(m.bot, m.from_user.id):
         text, markup = await _force_join_message(m.bot)
         await m.answer(text, reply_markup=markup)
@@ -181,7 +200,7 @@ async def start(m: Message):
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     await m.answer(
         welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
-        reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
+        reply_markup=_kb_main_for(m.from_user.id),
         parse_mode=ParseMode.HTML,
     )
 
@@ -194,7 +213,7 @@ async def home(cb: CallbackQuery):
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     await cb.message.edit_text(
         welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
-        reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
+        reply_markup=_kb_main_for(cb.from_user.id),
         parse_mode=ParseMode.HTML,
     )
 
@@ -205,7 +224,9 @@ async def buy_menu(cb: CallbackQuery):
     plans = db_get_plans_for_user(is_adm)
     if user_has_test_purchase(cb.from_user.id) and not is_adm:
         plans = [p for p in plans if not _plan_flags(p).get("test")]
-    await cb.message.edit_text("🎯 یکی از پلن‌های زیر را انتخاب کن:", reply_markup=kb_plans(plans, is_adm))
+    discount_pct = get_global_discount_percent()
+    log_event(cb.from_user.id, "view_plans", {"discount_pct": discount_pct})
+    await cb.message.edit_text("🎯 یکی از پلن‌های زیر را انتخاب کن:", reply_markup=kb_plans(plans, is_adm, discount_pct))
 
 
 @router.callback_query(F.data.startswith("plan:"))
@@ -217,7 +238,8 @@ async def plan_select(cb: CallbackQuery):
     flags = _plan_flags(plan)
     if flags.get("test") and not is_admin(cb.from_user.id) and user_has_test_purchase(cb.from_user.id):
         return await cb.answer("شما قبلا پلن آزمایشی دریافت کرده‌ای.", show_alert=True)
-    price = int(plan["price"])
+    orig_price = int(plan["price"])
+    price, discount_pct = _apply_discount(orig_price)
     bal = db_get_wallet(cb.from_user.id)
     if bal < price:
         kb = InlineKeyboardMarkup(
@@ -228,7 +250,9 @@ async def plan_select(cb: CallbackQuery):
         )
         await cb.message.edit_text(
             "⚠️ موجودی کیف پول برای این خرید کافی نیست:\n"
-            f"• مبلغ پلن: <b>{price:,}</b> تومان\n"
+            f"• مبلغ پلن: <b>{price:,}</b> تومان"
+            + (f" (با تخفیف {discount_pct}% از {orig_price:,})" if discount_pct else "")
+            + "\n"
             f"• موجودی فعلی: <b>{bal:,}</b> تومان",
             reply_markup=kb,
             parse_mode=ParseMode.HTML,
@@ -241,7 +265,9 @@ async def plan_select(cb: CallbackQuery):
         ]
     )
     await cb.message.edit_text(
-        f"🛒 پلن انتخابی: <b>{plan['title']}</b>\n💵 مبلغ: <b>{price:,}</b> تومان\nآیا تایید می‌کنی؟",
+        f"🛒 پلن انتخابی: <b>{plan['title']}</b>\n💵 مبلغ: <b>{price:,}</b> تومان"
+        + (f" (با تخفیف {discount_pct}% از {orig_price:,})" if discount_pct else "")
+        + "\nآیا تایید می‌کنی؟",
         reply_markup=kb,
         parse_mode=ParseMode.HTML,
     )
@@ -256,7 +282,13 @@ async def buy_confirm(cb: CallbackQuery):
     flags = _plan_flags(plan)
     if flags.get("test") and not is_admin(cb.from_user.id) and user_has_test_purchase(cb.from_user.id):
         return await cb.answer("شما قبلا پلن آزمایشی دریافت کرده‌ای.", show_alert=True)
-    price = int(plan["price"])
+    orig_price = int(plan["price"])
+    price, discount_pct = _apply_discount(orig_price)
+    log_event(
+        cb.from_user.id,
+        "checkout_initiated",
+        {"plan_id": pid, "price": price, "orig_price": orig_price, "discount_pct": discount_pct},
+    )
     if not try_deduct_wallet(cb.from_user.id, price):
         logger.warning("Buy failed insufficient wallet uid=%s plan=%s price=%s", cb.from_user.id, pid, price)
         return await cb.answer("موجودی کافی نیست.", show_alert=True)
@@ -273,44 +305,90 @@ async def buy_confirm(cb: CallbackQuery):
     email = f"{name_part}-{plan_slug}-{uniq}@{domain_part}"
     remark = f"{(cb.from_user.full_name or cb.from_user.username or cb.from_user.id)} | {plan['title']} | {cb.from_user.id}"
     device_limit = int(flags.get("device_limit") or 0)
-    meta_value = "test" if flags.get("test") else None
+    meta_value = {"test": True} if flags.get("test") else {}
+    now_ms = int(datetime.now(TZ).timestamp() * 1000)
+    active_purchase = get_active_purchase_for_inbound(cb.from_user.id, inbound_id, now_ms)
+    sub_link = None
     try:
-        added = await three_session.add_client(
-            inbound_id,
-            email=email,
-            expire_days=int(plan["days"]),
-            data_gb=int(plan["gb"]),
-            remark=remark,
-            limit_ip=device_limit,
-        )
-        client = added["client"]
-        client_id = client["id"]
-        sub_id = client.get("subId") or secrets.token_hex(6)
-        if not client.get("subId"):
-            c2 = dict(client)
-            c2["subId"] = sub_id
-            await three_session.update_client(inbound_id, client_id, c2)
-        sub_link = build_subscribe_url(sub_id)
-        expiry_ms = int(client.get("expiryTime") or 0)
-        allocated_gb = int(plan["gb"] or 0)
+        if active_purchase:
+            client_id = active_purchase["three_xui_client_id"]
+            client_email = active_purchase.get("client_email")
+            stat = await three_session.get_client_stats(inbound_id, client_id, client_email)
+            if not stat:
+                raise RuntimeError("panel_stat_missing")
+            current_total = int(stat.get("total") or 0)
+            add_total = int(plan["gb"] or 0) * 1024**3
+            new_total = current_total + add_total
+            cur_expiry = int(stat.get("expiryTime") or 0)
+            base_expiry = cur_expiry if cur_expiry > now_ms else now_ms
+            new_expiry = base_expiry + int(plan["days"] or 0) * 24 * 3600 * 1000
+            payload = dict(stat)
+            payload["total"] = new_total
+            payload["expiryTime"] = new_expiry
+            await three_session.update_client(inbound_id, payload.get("id") or client_id, payload)
+            sub_id = active_purchase.get("sub_id") or payload.get("subId")
+            if not sub_id:
+                sub_id = await three_session.rotate_subid(inbound_id, payload.get("id") or client_id, email=client_email)
+            sub_link = active_purchase.get("sub_link") or build_subscribe_url(sub_id)
+            meta_json = dict(meta_value)
+            meta_json["renewed_from"] = active_purchase["id"]
+            new_pid = db_new_purchase(
+                user_id=cb.from_user.id,
+                plan_id=plan["id"],
+                price=price,
+                three_xui_client_id=client_id,
+                three_xui_inbound_id=str(inbound_id),
+                client_email=client_email,
+                sub_id=sub_id,
+                sub_link=sub_link,
+                allocated_gb=int(plan["gb"] or 0),
+                expiry_ms=new_expiry,
+                meta=json.dumps(meta_json, ensure_ascii=False) if meta_json else None,
+            )
+            mark_purchase_superseded(active_purchase["id"], new_pid)
+            cur.execute(
+                "UPDATE purchases SET active=0 WHERE user_id=? AND three_xui_inbound_id=? AND id<>?",
+                (cb.from_user.id, str(inbound_id), new_pid),
+            )
+            cache_set_usage(new_pid, int(stat.get("up") or 0), int(stat.get("down") or 0), new_total, new_expiry)
+        else:
+            added = await three_session.add_client(
+                inbound_id,
+                email=email,
+                expire_days=int(plan["days"]),
+                data_gb=int(plan["gb"]),
+                remark=remark,
+                limit_ip=device_limit,
+            )
+            client = added["client"]
+            client_id = client["id"]
+            sub_id = client.get("subId") or secrets.token_hex(6)
+            if not client.get("subId"):
+                c2 = dict(client)
+                c2["subId"] = sub_id
+                await three_session.update_client(inbound_id, client_id, c2)
+            sub_link = build_subscribe_url(sub_id)
+            expiry_ms = int(client.get("expiryTime") or 0)
+            allocated_gb = int(plan["gb"] or 0)
+            db_new_purchase(
+                user_id=cb.from_user.id,
+                plan_id=plan["id"],
+                price=price,
+                three_xui_client_id=client_id,
+                three_xui_inbound_id=str(inbound_id),
+                client_email=email,
+                sub_id=sub_id,
+                sub_link=sub_link,
+                allocated_gb=allocated_gb,
+                expiry_ms=expiry_ms,
+                meta=json.dumps(meta_value, ensure_ascii=False) if meta_value else None,
+            )
     except Exception as e:
         rollback_wallet(cb.from_user.id, price)
-        await cb.message.edit_text(f"خطا در ایجاد اشتراک:\n<code>{htmlesc(str(e))}</code>", parse_mode=ParseMode.HTML)
-        logger.exception("Add client failed uid=%s plan=%s", cb.from_user.id, pid)
+        await cb.message.edit_text(f"❌ خطا در ایجاد/تمدید کانکشن:\n<code>{htmlesc(str(e))}</code>", parse_mode=ParseMode.HTML)
+        logger.exception("Add/renew client failed uid=%s plan=%s", cb.from_user.id, pid)
         return
-    db_new_purchase(
-        user_id=cb.from_user.id,
-        plan_id=plan["id"],
-        price=price,
-        three_xui_client_id=client_id,
-        three_xui_inbound_id=str(inbound_id),
-        client_email=email,
-        sub_id=sub_id,
-        sub_link=sub_link,
-        allocated_gb=allocated_gb,
-        expiry_ms=expiry_ms,
-        meta=meta_value,
-    )
+    log_event(cb.from_user.id, "purchase_success", {"plan_id": plan["id"], "paid_price": price})
     try:
         await _deliver_subscription_link(cb.bot, cb.from_user.id, sub_link)
     except Exception:
@@ -322,19 +400,19 @@ async def buy_confirm(cb: CallbackQuery):
     try:
         await cb.message.edit_text(
             success_text,
-            reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
+            reply_markup=_kb_main_for(cb.from_user.id),
         )
     except Exception:
         await cb.bot.send_message(
             cb.from_user.id,
             success_text,
-            reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
+            reply_markup=_kb_main_for(cb.from_user.id),
         )
 
 
 @router.callback_query(F.data == "mysubs")
 async def mysubs(cb: CallbackQuery):
-    rows = user_purchases(cb.from_user.id)
+    rows = user_active_purchases(cb.from_user.id)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="home")],
@@ -431,8 +509,6 @@ async def sub_stat_refresh(cb: CallbackQuery):
     if total <= 0 and int(r["allocated_gb"] or 0) > 0:
         total = int(r["allocated_gb"]) * 1024 ** 3
     expiry = int(stat.get("expiryTime") or r["expiry_ms"] or 0)
-    from db import cache_set_usage
-
     cache_set_usage(pid, int(stat.get("up") or 0), int(stat.get("down") or 0), total, expiry)
     await cb.answer("✅ آمار به‌روز شد")
     await sub_detail(cb)
@@ -454,7 +530,7 @@ async def recheck_join(cb: CallbackQuery):
     welcome = get_setting("WELCOME_TEMPLATE", "👋 به پینگ‌ایکس خوش آمدی!")
     await cb.message.edit_text(
         welcome + f"\n\n💰 موجودی کیف پول: <b>{bal:,}</b> تومان",
-        reply_markup=kb_main(cb.from_user.id, is_admin(cb.from_user.id)),
+        reply_markup=_kb_main_for(cb.from_user.id),
         parse_mode=ParseMode.HTML,
     )
 
@@ -476,6 +552,6 @@ async def fallback_main_menu(m: Message):
     logger.info("Fallback main menu uid=%s state=None text=%s", m.from_user.id, (m.text or "")[:200])
     await m.answer(
         welcome + f"\n\n💰 موجودی فعلی شما: <b>{bal:,}</b> تومان",
-        reply_markup=kb_main(m.from_user.id, is_admin(m.from_user.id)),
+        reply_markup=_kb_main_for(m.from_user.id),
         parse_mode=ParseMode.HTML,
     )

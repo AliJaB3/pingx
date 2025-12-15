@@ -183,6 +183,18 @@ class ThreeXUISession:
         stat = await self.get_client_stats(inbound_id, client_id=email, email=email)
         return stat
 
+    @staticmethod
+    def _format_stat(obj):
+        if not obj:
+            return None
+        res = dict(obj)
+        for key in ("up", "down", "total", "expiryTime"):
+            try:
+                res[key] = int(obj.get(key) or 0)
+            except Exception:
+                res[key] = 0
+        return res
+
     async def add_client(
         self, inbound_id: int, email: str, expire_days: int, data_gb: int, remark: str, limit_ip: int | None = None
     ):
@@ -461,47 +473,28 @@ class ThreeXUISession:
                 s = json.loads(s) if isinstance(s, str) else (s or {})
                 for c in s.get("clients") or []:
                     if str(c.get("id")) == str(client_id) or (email and c.get("email") == email):
-                        return {
-                            "id": c.get("id"),
-                            "email": c.get("email"),
-                            "subId": c.get("subId"),
-                            "up": int(c.get("up", 0)),
-                            "down": int(c.get("down", 0)),
-                            "total": int(c.get("total", 0)),
-                            "expiryTime": int(c.get("expiryTime", 0) or 0),
-                        }
+                        return self._format_stat(c)
         except Exception:
             pass
-        for p in (
+        paths = (
             f"/panel/api/inbounds/getClientTraffics/{email or client_id}",
             f"/panel/api/inbounds/getClientTrafficsById/{client_id}",
-        ):
+            f"/api/inbounds/getClientTraffics/{email or client_id}",
+            f"/api/inbounds/getClientTrafficsById/{client_id}",
+            f"/xui/inbound/getClientTraffics/{email or client_id}",
+            f"/xui/inbound/getClientTrafficsById/{client_id}",
+        )
+        for p in paths:
             try:
                 d = await self.request("GET", p, params={"inboundId": inbound_id})
                 if isinstance(d, dict) and "obj" in d:
                     obj = d["obj"]
                     if isinstance(obj, dict):
-                        return {
-                            "id": obj.get("id"),
-                            "email": obj.get("email"),
-                            "subId": obj.get("subId"),
-                            "up": int(obj.get("up", 0)),
-                            "down": int(obj.get("down", 0)),
-                            "total": int(obj.get("total", 0)),
-                            "expiryTime": int(obj.get("expiryTime", 0) or 0),
-                        }
+                        return self._format_stat(obj)
                     if isinstance(obj, list):
                         for it in obj:
                             if str(it.get("id")) == str(client_id) or (email and it.get("email") == email):
-                                return {
-                                    "id": it.get("id"),
-                                    "email": it.get("email"),
-                                    "subId": it.get("subId"),
-                                    "up": int(it.get("up", 0)),
-                                    "down": int(it.get("down", 0)),
-                                    "total": int(it.get("total", 0)),
-                                    "expiryTime": int(it.get("expiryTime", 0) or 0),
-                                }
+                                return self._format_stat(it)
             except Exception:
                 continue
         return None

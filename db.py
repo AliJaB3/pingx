@@ -63,6 +63,7 @@ def migrate():
     );"""
     )
     add_col("plans", "flags", "TEXT DEFAULT '{}' ")
+    add_col("plans", "sort_order", "INTEGER NOT NULL DEFAULT 0")
 
     cur.execute(
         """
@@ -84,6 +85,8 @@ def migrate():
     add_col("purchases", "meta", "TEXT")
     add_col("purchases", "last_expiry_notice", "INTEGER")
     add_col("purchases", "last_expiry_notice_at", "TEXT")
+    add_col("purchases", "active", "INTEGER NOT NULL DEFAULT 1")
+    add_col("purchases", "superseded_by", "INTEGER")
 
     cur.execute(
         """
@@ -168,6 +171,17 @@ def migrate():
     )
     cur.execute("CREATE INDEX IF NOT EXISTS idx_referral_joins_code ON referral_joins(code);")
 
+    cur.execute(
+        """
+    CREATE TABLE IF NOT EXISTS events(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        event TEXT NOT NULL,
+        meta_json TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );"""
+    )
+
 
 def set_setting(k, v):
     cur.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (k, v))
@@ -220,6 +234,35 @@ def remove_admin(uid: int):
     set_setting("ADMIN_IDS", ",".join(str(x) for x in sorted(ids)))
 
 
+def get_support_ids() -> set[int]:
+    return _parse_ids_csv(get_setting("SUPPORT_IDS", ""))
+
+
+def is_support(uid: int) -> bool:
+    try:
+        uid = int(uid)
+    except Exception:
+        return False
+    return uid in get_support_ids()
+
+
+def is_staff(uid: int) -> bool:
+    return is_admin(uid) or is_support(uid)
+
+
+def add_support(uid: int):
+    ids = _parse_ids_csv(get_setting("SUPPORT_IDS", ""))
+    ids.add(int(uid))
+    set_setting("SUPPORT_IDS", ",".join(str(x) for x in sorted(ids)))
+
+
+def remove_support(uid: int):
+    ids = _parse_ids_csv(get_setting("SUPPORT_IDS", ""))
+    if int(uid) in ids:
+        ids.remove(int(uid))
+    set_setting("SUPPORT_IDS", ",".join(str(x) for x in sorted(ids)))
+
+
 def ensure_defaults():
     # Only backfill defaults when a value is missing; don't override panel changes.
     def set_if_missing(key: str, value):
@@ -252,6 +295,10 @@ def ensure_defaults():
         set_setting("TICKET_OPENED_TEMPLATE", "🆘 تیکت شما باز شد. پیام خود را بفرستید.")
     if not get_setting("TICKET_CLOSED_TEMPLATE"):
         set_setting("TICKET_CLOSED_TEMPLATE", "✅ تیکت بسته شد. برای تیکت جدید دوباره پیام بدهید.")
+
+
+    set_if_missing("GLOBAL_DISCOUNT_PERCENT", "0")
+    set_if_missing("SUPPORT_IDS", "")
 
 
 def ensure_default_plans():
@@ -288,6 +335,17 @@ def ensure_default_plans():
 
 def log_evt(actor_id: int, action: str, meta: dict):
     cur.execute("INSERT INTO audit_logs(ts,actor_id,action,meta) VALUES(?,?,?,?)", (now_iso(), actor_id, action, json.dumps(meta, ensure_ascii=False)))
+
+
+def log_event(user_id: int, event: str, meta: dict | None = None):
+    cur.execute(
+        "INSERT INTO events(user_id,event,meta_json,created_at) VALUES(?,?,?,?)",
+        (user_id, event, json.dumps(meta or {}, ensure_ascii=False), now_iso()),
+    )
+
+
+def count_users() -> int:
+    return cur.execute("SELECT COUNT(1) FROM users").fetchone()[0]
 
 
 # Referral helpers
@@ -411,7 +469,7 @@ def db_get_plan(pid: str):
 
 
 def db_list_plans():
-    return [dict(r) for r in cur.execute("SELECT * FROM plans ORDER BY id").fetchall()]
+    return [dict(r) for r in cur.execute("SELECT * FROM plans ORDER BY sort_order ASC, id ASC").fetchall()]
 
 
 def db_insert_plan(pid: str, title: str, days: int, gb: int, price: int, flags: dict | None = None):
@@ -431,8 +489,31 @@ def db_delete_plan(pid: str):
     cur.execute("DELETE FROM plans WHERE id=?", (pid,))
 
 
+def db_swap_plan_order(pid: str, direction: str):
+    plans = db_list_plans()
+    ordered = sorted(plans, key=lambda p: (int(p.get("sort_order") or 0), p["id"]))
+    idx = next((i for i, p in enumerate(ordered) if p["id"] == pid), None)
+    if idx is None:
+        return False
+    if direction == "up":
+        target_idx = idx - 1
+    elif direction == "down":
+        target_idx = idx + 1
+    else:
+        return False
+    if target_idx < 0 or target_idx >= len(ordered):
+        return False
+    a = ordered[idx]
+    b = ordered[target_idx]
+    order_a = int(a.get("sort_order") or idx)
+    order_b = int(b.get("sort_order") or target_idx)
+    cur.execute("UPDATE plans SET sort_order=? WHERE id=?", (order_b, a["id"]))
+    cur.execute("UPDATE plans SET sort_order=? WHERE id=?", (order_a, b["id"]))
+    return True
+
+
 def db_get_plans_for_user(is_admin: bool):
-    rows = [dict(r) for r in cur.execute("SELECT * FROM plans ORDER BY id").fetchall()]
+    rows = [dict(r) for r in cur.execute("SELECT * FROM plans ORDER BY sort_order ASC, id ASC").fetchall()]
     res = []
     for p in rows:
         import json
@@ -478,9 +559,24 @@ def user_has_test_purchase(uid: int) -> bool:
 
 
 def db_new_purchase(**kw):
-    fields = ["user_id", "plan_id", "price", "three_xui_client_id", "three_xui_inbound_id", "client_email", "sub_id", "sub_link", "allocated_gb", "expiry_ms", "created_at", "meta"]
+    fields = [
+        "user_id",
+        "plan_id",
+        "price",
+        "three_xui_client_id",
+        "three_xui_inbound_id",
+        "client_email",
+        "sub_id",
+        "sub_link",
+        "allocated_gb",
+        "expiry_ms",
+        "created_at",
+        "meta",
+        "active",
+        "superseded_by",
+    ]
     cur.execute(
-        f"INSERT INTO purchases ({','.join(fields)}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        f"INSERT INTO purchases ({','.join(fields)}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             kw.get("user_id"),
             kw.get("plan_id"),
@@ -494,13 +590,60 @@ def db_new_purchase(**kw):
             kw.get("expiry_ms"),
             now_iso(),
             kw.get("meta"),
+            int(kw.get("active")) if kw.get("active") is not None else 1,
+            kw.get("superseded_by"),
         ),
     )
     return cur.lastrowid
 
 
+def mark_purchase_superseded(old_id: int, new_id: int):
+    cur.execute("UPDATE purchases SET active=0, superseded_by=? WHERE id=?", (new_id, old_id))
+
+
+def get_active_purchase_for_inbound(uid: int, inbound_id: int | str, now_ms: int | None = None):
+    """
+    Active purchase rule:
+      - active=1 AND inbound matches AND (expiry_ms is null/zero OR expiry_ms > now)
+      - expired purchases (expiry_ms <= now) are treated as inactive for renewals, and a NEW client is created.
+    """
+    if now_ms is None:
+        now_ms = int(datetime.now(TZ).timestamp() * 1000)
+    r = cur.execute(
+        """
+        SELECT * FROM purchases
+        WHERE user_id=? AND active=1 AND three_xui_inbound_id=? AND (expiry_ms IS NULL OR expiry_ms=0 OR expiry_ms>?)
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (uid, str(inbound_id), now_ms),
+    ).fetchone()
+    return dict(r) if r else None
+
+
+def list_active_purchases(now_ms: int | None = None, inbound_id: int | str | None = None):
+    if now_ms is None:
+        now_ms = int(datetime.now(TZ).timestamp() * 1000)
+    q = "SELECT * FROM purchases WHERE active=1 AND (expiry_ms IS NULL OR expiry_ms=0 OR expiry_ms>?)"
+    params: list = [now_ms]
+    if inbound_id is not None:
+        q += " AND three_xui_inbound_id=?"
+        params.append(str(inbound_id))
+    return [dict(r) for r in cur.execute(q, params).fetchall()]
+
+
 def user_purchases(uid: int):
     return [dict(r) for r in cur.execute("SELECT * FROM purchases WHERE user_id=? ORDER BY id DESC", (uid,)).fetchall()]
+
+
+def user_active_purchases(uid: int):
+    return [
+        dict(r)
+        for r in cur.execute(
+            "SELECT * FROM purchases WHERE user_id=? AND active=1 ORDER BY id DESC",
+            (uid,),
+        ).fetchall()
+    ]
 
 
 def cache_set_usage(purchase_id: int, up: int, down: int, total: int, expiry_ms: int):
@@ -573,3 +716,30 @@ def list_ticket_messages_page(tid: int, page: int, size: int):
 def find_ticket_by_msg_id(tg_msg_id: int):
     r = cur.execute("SELECT ticket_id FROM ticket_messages WHERE tg_msg_id=?", (tg_msg_id,)).fetchone()
     return r["ticket_id"] if r else None
+
+
+def get_global_discount_percent() -> int:
+    try:
+        return max(0, min(90, int(str(get_setting("GLOBAL_DISCOUNT_PERCENT", "0")).strip() or 0)))
+    except Exception:
+        return 0
+
+
+def purchases_stats_range(start_iso: str, end_iso: str):
+    row = cur.execute(
+        """
+        SELECT COALESCE(SUM(price),0) AS revenue, COUNT(1) AS orders, COUNT(DISTINCT user_id) AS buyers
+        FROM purchases
+        WHERE created_at>=? AND created_at<?
+        """,
+        (start_iso, end_iso),
+    ).fetchone()
+    return {"revenue": int(row["revenue"] or 0), "orders": int(row["orders"] or 0), "buyers": int(row["buyers"] or 0)}
+
+
+def events_count(event: str, start_iso: str, end_iso: str) -> int:
+    row = cur.execute(
+        "SELECT COUNT(1) FROM events WHERE event=? AND created_at>=? AND created_at<?",
+        (event, start_iso, end_iso),
+    ).fetchone()
+    return int(row[0] or 0)
