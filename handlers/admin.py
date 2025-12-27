@@ -77,6 +77,10 @@ class DiscountEdit(StatesGroup):
     waiting = State()
 
 
+class Broadcast(StatesGroup):
+    waiting = State()
+
+
 def _generate_ref_code():
     import secrets
 
@@ -597,6 +601,7 @@ async def _render_admin_user_detail(cb: CallbackQuery, uid: int):
                 InlineKeyboardButton(text="+50k", callback_data=f"admin:u:wallet:{uid}:+50000"),
                 InlineKeyboardButton(text="-50k", callback_data=f"admin:u:wallet:{uid}:-50000"),
             ],
+            [InlineKeyboardButton(text="📨 ارسال قالب", callback_data=f"admin:u:sendtemplate:{uid}")],
             [InlineKeyboardButton(text="بازگشت ⬅️", callback_data="admin:users:0:")],
         ]
     )
@@ -625,6 +630,47 @@ async def admin_user_wallet_adjust(cb: CallbackQuery):
     db_add_wallet(uid, delta)
     log_evt(cb.from_user.id, "wallet_adjust", {"target": uid, "delta": delta})
     await cb.answer(f"تغییر {delta:+,} ثبت شد.")
+    await _render_admin_user_detail(cb, uid)
+
+
+@router.callback_query(F.data.regexp(r"^admin:u:sendtemplate:(\d+)$"))
+async def admin_user_send_template(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    uid = int(re.match(r"^admin:u:sendtemplate:(\d+)$", cb.data).group(1))
+    # List templates
+    templates = []
+    for key in ["WELCOME_TEMPLATE", "POST_PURCHASE_TEMPLATE", "PURCHASE_SUCCESS_TEMPLATE", "PURCHASE_FAILED_TEMPLATE", "PAYMENT_RECEIPT_TEMPLATE", "TICKET_OPENED_TEMPLATE", "TICKET_CLOSED_TEMPLATE"]:
+        val = get_setting(key)
+        if val:
+            templates.append((key, val[:50] + "..." if len(val) > 50 else val))
+    if not templates:
+        await cb.answer("قالبی یافت نشد.", show_alert=True)
+        return
+    kb = []
+    for key, preview in templates:
+        kb.append([InlineKeyboardButton(text=f"{key}: {preview}", callback_data=f"admin:u:send:{uid}:{key}")])
+    kb.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"admin:u:{uid}")])
+    await cb.message.edit_text(f"انتخاب قالب برای ارسال به کاربر {uid}:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+@router.callback_query(F.data.regexp(r"^admin:u:send:(\d+):(.+)$"))
+async def admin_user_send_template_confirm(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    m = re.match(r"^admin:u:send:(\d+):(.+)$", cb.data)
+    uid = int(m.group(1))
+    template_key = m.group(2)
+    template_text = get_setting(template_key)
+    if not template_text:
+        await cb.answer("قالب یافت نشد.", show_alert=True)
+        return
+    try:
+        await cb.bot.send_message(uid, template_text, parse_mode=ParseMode.HTML)
+        log_evt(cb.from_user.id, "send_template", {"target": uid, "template": template_key})
+        await cb.answer("قالب ارسال شد.")
+    except Exception as e:
+        await cb.answer(f"خطا در ارسال: {e}", show_alert=True)
     await _render_admin_user_detail(cb, uid)
 
 
@@ -1451,3 +1497,92 @@ async def admin_dashboard(cb:CallbackQuery):
         f"🛰️ وضعیت این‌باندها: {ib_txt}"
     )
     await cb.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")]]))
+
+
+# --- Broadcast message ---
+
+@router.callback_query(F.data == "admin:broadcast")
+async def admin_broadcast(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📝 پیام سفارشی", callback_data="admin:broadcast:custom")],
+            [InlineKeyboardButton(text="📋 از قالب‌ها", callback_data="admin:broadcast:template")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin")],
+        ]
+    )
+    await cb.message.edit_text("انتخاب نوع پیام همگانی:", reply_markup=kb)
+
+
+@router.callback_query(F.data == "admin:broadcast:custom")
+async def admin_broadcast_custom(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    await state.set_state(Broadcast.waiting)
+    await state.update_data(broadcast_type="custom")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:broadcast")]])
+    await cb.message.edit_text("پیام همگانی را ارسال کنید (پشتیبانی از HTML):", reply_markup=kb)
+
+
+@router.callback_query(F.data == "admin:broadcast:template")
+async def admin_broadcast_template(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    # List available templates
+    templates = []
+    for key in ["WELCOME_TEMPLATE", "POST_PURCHASE_TEMPLATE", "PURCHASE_SUCCESS_TEMPLATE", "PURCHASE_FAILED_TEMPLATE", "PAYMENT_RECEIPT_TEMPLATE", "TICKET_OPENED_TEMPLATE", "TICKET_CLOSED_TEMPLATE"]:
+        val = get_setting(key)
+        if val:
+            templates.append((key, val[:50] + "..." if len(val) > 50 else val))
+    if not templates:
+        await cb.answer("قالبی یافت نشد.", show_alert=True)
+        return
+    kb = []
+    for key, preview in templates:
+        kb.append([InlineKeyboardButton(text=f"{key}: {preview}", callback_data=f"admin:broadcast:send:{key}")])
+    kb.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:broadcast")])
+    await cb.message.edit_text("انتخاب قالب برای ارسال همگانی:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+@router.callback_query(F.data.regexp(r"^admin:broadcast:send:(.+)$"))
+async def admin_broadcast_send_template(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("دسترسی غیرمجاز", show_alert=True)
+    template_key = cb.data.split(":", 4)[3]
+    template_text = get_setting(template_key)
+    if not template_text:
+        await cb.answer("قالب یافت نشد.", show_alert=True)
+        return
+    await _send_broadcast(cb.bot, template_text, cb.from_user.id)
+    await cb.answer("پیام همگانی ارسال شد.")
+
+
+@router.message(StateFilter(Broadcast.waiting))
+async def admin_broadcast_send_custom(m: Message, state: FSMContext):
+    if not is_admin(m.from_user.id):
+        await m.answer("دسترسی غیرمجاز")
+        return await state.clear()
+    data = await state.get_data()
+    if data.get("broadcast_type") != "custom":
+        return await state.clear()
+    text = m.html_text or m.text or ""
+    if not text.strip():
+        return await m.reply("پیام نمی‌تواند خالی باشد.")
+    await _send_broadcast(m.bot, text, m.from_user.id)
+    await state.clear()
+    await m.reply("پیام همگانی ارسال شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:broadcast")]]))
+
+
+async def _send_broadcast(bot, message_text: str, sender_id: int):
+    users = cur.execute("SELECT user_id FROM users").fetchall()
+    sent = 0
+    failed = 0
+    for r in users:
+        uid = r["user_id"]
+        try:
+            await bot.send_message(uid, message_text, parse_mode=ParseMode.HTML)
+            sent += 1
+        except Exception:
+            failed += 1
+    log_evt(sender_id, "broadcast", {"sent": sent, "failed": failed, "message": message_text[:200]})
