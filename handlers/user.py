@@ -122,9 +122,12 @@ async def _resolve_subscription_link(row, mode: str = "panel") -> str:
             sub_id = current.get("subId") or sub_id
             expiry_ms = int(current.get("expiryTime") or expiry_ms or 0)
     if mode == "rotate" or not sub_id:
+        if mode == "rotate" and not current:
+            raise RuntimeError("client_not_found_on_panel")
         sub_id = await three_session.rotate_subid(inbound_id, client_id, email=client_email)
     link = build_subscribe_url(sub_id)
-    cur.execute("UPDATE purchases SET sub_id=?, sub_link=?, expiry_ms=? WHERE id=?", (sub_id, link, expiry_ms, row["id"]))
+    if current or mode == "rotate":
+        cur.execute("UPDATE purchases SET sub_id=?, sub_link=?, expiry_ms=? WHERE id=?", (sub_id, link, expiry_ms, row["id"]))
     return link
 
 
@@ -474,7 +477,9 @@ async def sub_fix_link(cb: CallbackQuery):
         except TelegramBadRequest:
             # callback timed out; ارسال پیام معمولی
             await cb.message.answer("لینک جدید صادر شد.")
-    except RuntimeError:
+    except RuntimeError as e:
+        if str(e) == "client_not_found_on_panel":
+            return await cb.answer("این اشتراک روی پنل فعلی یافت نشد، نمی‌توان لینک را تغییر داد.", show_alert=True)
         return await cb.answer("اتصال به سرور اشتراک برقرار نیست.", show_alert=True)
     except Exception:
         logger.exception("rotate_subid failed pid=%s uid=%s", pid, cb.from_user.id)

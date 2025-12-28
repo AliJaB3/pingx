@@ -1,4 +1,4 @@
-﻿import re, json, secrets
+﻿import re, json, secrets, asyncio
 import os, sqlite3, tempfile, zipfile, shutil
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1499,8 +1499,8 @@ async def admin_broadcast_send_template(cb: CallbackQuery):
     if not template_text:
         await cb.answer("قالب یافت نشد.", show_alert=True)
         return
-    await _send_broadcast(cb.bot, template_text, cb.from_user.id)
-    await cb.answer("پیام همگانی ارسال شد.")
+    asyncio.create_task(_send_broadcast(cb.bot, template_text, cb.from_user.id))
+    await cb.answer("پیام همگانی در حال ارسال است.")
 
 
 @router.message(StateFilter(Broadcast.waiting))
@@ -1508,15 +1508,12 @@ async def admin_broadcast_send_custom(m: Message, state: FSMContext):
     if not is_admin(m.from_user.id):
         await m.answer("دسترسی غیرمجاز")
         return await state.clear()
-    data = await state.get_data()
-    if data.get("broadcast_type") != "custom":
-        return await state.clear()
     text = m.html_text or m.text or ""
     if not text.strip():
         return await m.reply("پیام نمی‌تواند خالی باشد.")
-    await _send_broadcast(m.bot, text, m.from_user.id)
+    asyncio.create_task(_send_broadcast(m.bot, text, m.from_user.id))
     await state.clear()
-    await m.reply("پیام همگانی ارسال شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:broadcast")]]))
+    await m.reply("پیام همگانی در حال ارسال است.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data="admin:broadcast")]]))
 
 
 async def _send_broadcast(bot, message_text: str, sender_id: int):
@@ -1530,4 +1527,5 @@ async def _send_broadcast(bot, message_text: str, sender_id: int):
             sent += 1
         except Exception:
             failed += 1
+        await asyncio.sleep(0.05)
     log_evt(sender_id, "broadcast", {"sent": sent, "failed": failed, "message": message_text[:200]})

@@ -300,6 +300,7 @@ def ensure_defaults():
         set_setting("TICKET_OPENED_TEMPLATE", "🆘 تیکت شما باز شد. پیام خود را بفرستید.")
     if not get_setting("TICKET_CLOSED_TEMPLATE"):
         set_setting("TICKET_CLOSED_TEMPLATE", "✅ تیکت بسته شد. برای تیکت جدید دوباره پیام بدهید.")
+    set_if_missing("AFTER_PURCHASE_MESSAGE", "")
 
 
     set_if_missing("GLOBAL_DISCOUNT_PERCENT", "0")

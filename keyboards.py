@@ -52,7 +52,7 @@ def kb_plans(plans, is_admin: bool, discount_pct: int = 0):
         final_price = int(price * (100 - pct) / 100) if pct > 0 else price
         price_txt = format_toman(final_price)
         if pct > 0:
-            price_txt += f" ({format_toman(price)})"
+            price_txt += f" (تخفیف {pct}% از {format_toman(price)})"
         rows.append(
             [
                 InlineKeyboardButton(
